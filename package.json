@@ -11,8 +11,17 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
     "contracts:test": "cd contracts && forge test",
     "contracts:build": "cd contracts && forge build"
+  },
+  "engines": {
+    "node": "22.x"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
