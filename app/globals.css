@@ -1,0 +1,101 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .text-display-xl { font-family: var(--font-display); font-size: clamp(2.25rem, 6vw, 4rem); font-weight: 700; letter-spacing: -0.03em; line-height: 1.08; overflow-wrap: anywhere; }
+  .text-display-lg { font-family: var(--font-display); font-size: clamp(1.875rem, 4vw, 2.75rem); font-weight: 700; letter-spacing: -0.025em; line-height: 1.12; }
+  .text-heading-xl { font-family: var(--font-sans); font-size: 1.5rem; font-weight: 600; letter-spacing: -0.018em; line-height: 1.3; }
+  .text-heading-md { font-family: var(--font-sans); font-size: 1.125rem; font-weight: 600; letter-spacing: -0.012em; line-height: 1.35; }
+  .text-label      { font-family: var(--font-sans); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+  .text-mono-sm    { font-family: var(--font-mono); font-size: 0.8125rem; font-weight: 500; letter-spacing: -0.01em; }
+  .text-amount     { font-family: var(--font-mono); font-size: 1.5rem; font-weight: 500; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+}
+
+@layer base {
+  :root {
+    --background: 222 53% 6%;
+    --foreground: 210 40% 98%;
+
+    --card: 222 47% 11%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222 47% 11%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 173 80% 40%;
+    --primary-foreground: 222 47% 11%;
+
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 173 80% 40%;
+    --accent-foreground: 222 47% 11%;
+
+    --destructive: 347 77% 50%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217 33% 17%;
+    --input: 217 33% 17%;
+    --ring: 173 80% 40%;
+
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased selection:bg-teal-500/20 selection:text-teal-300;
+    font-feature-settings: "rlig" 1, "calt" 1, "tnum" 1;
+    background-color: #080d1a;
+    color: #f8fafc;
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #080d1a;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* Custom Animation Keyframes */
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.85; }
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+@keyframes orbit {
+  0% { transform: rotate(0deg) translateX(12px) rotate(0deg); }
+  100% { transform: rotate(360deg) translateX(12px) rotate(-360deg); }
+}
+
+@keyframes float-slow {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-8px) scale(1.02); }
+}
+
+.animate-glow-pulse { animation: glow-pulse 3s ease-in-out infinite both; }
+.animate-shimmer { animation: shimmer 2s ease infinite both; }
+.animate-orbit { animation: orbit 2.5s linear infinite both; }
+.animate-float-slow { animation: float-slow 4s ease-in-out infinite both; }

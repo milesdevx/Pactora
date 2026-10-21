@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Next.js
+.next/
+out/
+
+# Environment files
+.env
+.env*.local
+!.env.example
+
+# Testing & Coverage
+coverage/
+.vitest/
+# Foundry
+contracts/out/
+contracts/cache/
+
+# System & OS
+.agents
+.codex
+.DS_Store
+Thumbs.db
+*.log
