@@ -27,7 +27,7 @@ export function LiveEscrowPreview() {
   }, [shouldReduceMotion]);
 
   return (
-    <div className="relative w-full max-w-lg mx-auto">
+    <div className="relative w-full max-w-lg mx-auto" data-ui>
       {/* Dynamic ambient backdrop behind the card */}
       <motion.div
         animate={{
@@ -39,17 +39,18 @@ export function LiveEscrowPreview() {
       />
 
       <div className="rounded-2xl border border-slate-700/80 bg-[#0f172a]/95 backdrop-blur-xl p-6 shadow-2xl transition-all">
+        <p className="mb-3 text-sm font-semibold text-amber-300">Illustration, not real funds</p>
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-slate-800">
           <div className="flex items-center gap-2">
-            <span className="text-[11px] font-mono text-slate-400">Agreement #042</span>
+            <span className="text-[11px] font-mono text-slate-400">Illustrative agreement</span>
             <Badge variant="success" className="text-[10px] py-0 px-2">
               Funded in MUSD
             </Badge>
           </div>
           <div className="flex items-center gap-1.5 text-[11px] font-mono text-teal-400">
             <span className="h-2 w-2 rounded-full bg-teal-400 animate-pulse" />
-            <span>Live Simulation</span>
+            <span>Illustration</span>
           </div>
         </div>
 
@@ -192,7 +193,7 @@ export function LiveEscrowPreview() {
                 </AnimatePresence>
 
                 <span className="text-[10px] font-mono text-slate-500">
-                  {phase === 2 ? "Tx: 0x82f...a1b4" : "ID: ms-01"}
+                  No transaction sent
                 </span>
               </div>
             </div>
@@ -238,4 +239,3 @@ export function LiveEscrowPreview() {
     </div>
   );
 }
-

@@ -4,6 +4,7 @@
 [![Mezo Testnet](https://img.shields.io/badge/Mezo%20Testnet-Chain%20ID%2031611-orange)](https://explorer.test.mezo.org)
 [![Next.js](https://img.shields.io/badge/Next.js-15.5-black)](https://nextjs.org/)
 [![Foundry](https://img.shields.io/badge/Foundry-Tested-blue)](https://getfoundry.sh/)
+[![CI](https://github.com/milesdevx/Pactora/actions/workflows/ci.yml/badge.svg)](https://github.com/milesdevx/Pactora/actions/workflows/ci.yml)
 
 > **Work agreed. Funds protected. Payments verified.**  
 > Pactora is a non-custodial milestone escrow and payment coordination protocol built specifically for freelancers, agencies, and clients operating within the Mezo ecosystem.
@@ -14,9 +15,9 @@
 
 - **Native to Mezo:** Built around Mezo's Bitcoin-based gas economics and canonical **MUSD** stablecoin.
 - **Non-Custodial Escrow (`PactoraEscrow.sol`):** Funds are locked in smart contract escrow with OpenZeppelin `ReentrancyGuard` and strict mathematical invariants ($\sum \text{milestones} = \text{total}$).
-- **Mutual Consent Settlement:** Cryptographic dispute engine requiring mutual agreement to resolve contested funds without centralized arbiter risk.
-- **Real-Time Telegram Alerts:** Bidirectional bot integration delivering instant updates for milestone submissions, approvals, rejections, and fund releases.
-- **Zero Mock Data:** Built with real Wagmi v2 + Viem hooks, live Mezo RPC integration, verified on-chain receipts, and authenticated single-use linking tokens.
+- **Mutual Consent Settlement:** On-chain mutual-consent split of the remaining escrow. Pactora does not arbitrate subjective disputes.
+- **Telegram Coordination:** Wallet linking, notification preferences, and agreement lookup. Confirmed-event notifications are being hardened before submission.
+- **Honest Data:** Wagmi v2 + Viem read Mezo Testnet. The homepage preview is explicitly labelled "Illustration, not real funds"; it is not deployment or payment evidence.
 
 ---
 
@@ -38,12 +39,12 @@ Verified against official [Mezo Documentation](https://mezo.org/docs/developers/
 
 ## 🛠 Tech Stack
 
-- **Smart Contracts:** Solidity `^0.8.20`, Foundry (`forge`), OpenZeppelin Contracts (ReentrancyGuard, SafeERC20).
+- **Smart Contracts:** Solidity `^0.8.24`, Foundry (`forge`), OpenZeppelin Contracts (ReentrancyGuard, SafeERC20).
 - **Web Application:** Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS, Lucide Icons.
 - **Web3 Connectivity:** Wagmi v2, Viem, TanStack Query.
 - **Database & ORM:** PostgreSQL, Drizzle ORM, Drizzle Kit.
-- **Notification Services:** Telegram Bot API, HMAC webhook authentication, single-use CSPRNG tokens.
-- **Testing:** Foundry (19 Solidity unit & fuzz tests), Vitest (schemas, crypto, components).
+- **Notification Services:** Telegram Bot API, secret-token header verification (not HMAC), single-use CSPRNG tokens. Constant-time enforcement and atomic consumption are release gates, not assumed guarantees.
+- **Testing:** Foundry (Solidity unit and fuzz tests), Vitest (schemas, crypto, components), Playwright (desktop/mobile public-page smoke test).
 
 ---
 
@@ -88,27 +89,24 @@ Verified against official [Mezo Documentation](https://mezo.org/docs/developers/
 ## ⚡ Quickstart & Local Setup
 
 ### 1. Prerequisites
-- **Node.js:** `>= 18.18.0` (tested with v24)
-- **pnpm:** `>= 9.0.0`
-- **Foundry:** `forge` CLI installed (`curl -L https://foundry.paradigm.xyz | bash`)
+- **Node.js:** **22.x** (matches `engines.node`; pnpm can download the project-local runtime).
+- **pnpm:** **12.14.0**, pinned in `packageManager`. Native build permissions are already configured in `pnpm-workspace.yaml`.
+- **Foundry:** `forge` CLI installed using the [official installation guide](https://getfoundry.sh/introduction/installation/). On Windows, the executable may be under `$HOME\.foundry\bin\forge.exe`.
 - **PostgreSQL Database:** (Local PostgreSQL or Supabase/Neon instance)
 
 ### 2. Clone and Install Dependencies
-```bash
-git clone https://github.com/PactoraProtocol/pactora.git
-cd pactora
+```powershell
+git clone https://github.com/milesdevx/Pactora.git
+Set-Location Pactora
 
 # Install web dependencies
-pnpm install
-
-# Approve native build scripts if prompted
-pnpm approve-builds --all
+pnpm.cmd install --frozen-lockfile
 ```
 
 ### 3. Configure Environment Variables
 Copy the template to your local environment file:
-```bash
-cp .env.example .env.local
+```powershell
+Copy-Item .env.example .env.local
 ```
 Fill in the required configuration variables:
 ```env
@@ -124,28 +122,24 @@ DATABASE_URL="postgres://postgres:password@localhost:5432/pactora"
 
 # Telegram Bot Integration
 TELEGRAM_BOT_TOKEN="your_bot_token_from_botfather"
-TELEGRAM_BOT_USERNAME="PactoraEscrowBot"
+TELEGRAM_BOT_USERNAME="PactoraAlertsBot"
 TELEGRAM_WEBHOOK_SECRET="random_secure_hex_secret_min_32_chars"
 ```
 
 ### 4. Database Setup
 Generate and apply database migrations using Drizzle:
-```bash
-# Push schema to your database
-pnpm db:push
+```powershell
+# Development: apply the current schema directly
+pnpm.cmd db:push
 
-# Or run migrations
-pnpm db:generate
+# Migration workflow: generate SQL, review it, then apply it
+pnpm.cmd db:generate
+pnpm.cmd db:migrate
 ```
 
 ### 5. Start Development Server
-```bash
-pnpm dev
-
-# On Windows PowerShell if script execution is restricted:
+```powershell
 pnpm.cmd dev
-# Or unrestrict execution policy:
-# Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
@@ -159,7 +153,7 @@ Execute the comprehensive test suite covering agreement creation, double-funding
 cd contracts
 forge test -vv
 ```
-**Test Results: 19 Passed, 0 Failed, 0 Skipped**
+Phase A run on **2026-11-07** from a clean temporary clone: **19 passed, 0 failed, 0 skipped**, including 256 fuzz runs. This is not an independent security audit.
 - `test_CreateAgreement_Success`
 - `test_CreateAgreement_Revert_ZeroAddress`
 - `test_CreateAgreement_Revert_ZeroMilestoneAmount`
@@ -182,18 +176,22 @@ forge test -vv
 
 ### Web & Unit Tests (Vitest)
 Run the TypeScript unit tests:
-```bash
-pnpm test
+```powershell
+pnpm.cmd test
 ```
-**Test Results: 11 Passed, 0 Failed**
+Phase A run on **2026-11-07**: **11 passed, 0 failed**. Later phases must rerun the suites after changes.
 - Validation schemas (Zod)
 - Cryptographic nonce & token hashing
 - UI component rendering and interaction
 
 ### Lint & Typecheck
-```bash
-pnpm lint
-pnpm typecheck
+```powershell
+pnpm.cmd typecheck
+pnpm.cmd lint
+pnpm.cmd test
+pnpm.cmd build
+pnpm.cmd exec playwright install chromium
+pnpm.cmd test:e2e
 ```
 
 ---
@@ -202,34 +200,32 @@ pnpm typecheck
 
 To deploy `PactoraEscrow.sol` to Mezo Testnet using Foundry:
 
-```bash
-cd contracts
-
-forge script script/DeployPactoraEscrow.s.sol:DeployPactoraEscrow \
-  --rpc-url https://rpc.test.mezo.org \
-  --broadcast \
-  --legacy \
-  --private-key $DEPLOYER_PRIVATE_KEY
+```powershell
+Set-Location contracts
+forge script script/DeployPactoraEscrow.s.sol:DeployPactoraEscrow `
+  --rpc-url https://rpc.test.mezo.org `
+  --chain-id 31611 `
+  --broadcast `
+  --legacy `
+  --account pactora-testnet
 ```
 
-Once deployed, copy the output contract address to `NEXT_PUBLIC_PACTORA_ESCROW_ADDRESS` in `.env.local` and restart the web server.
+Only the owner runs a redeploy, using a locally encrypted Foundry keystore. Never share a private key. Set the returned address in `NEXT_PUBLIC_PACTORA_ESCROW_ADDRESS` locally and in Vercel, then redeploy the web app because this value is inlined at build time.
+
+OpenZeppelin and forge-std sources are committed under `contracts/lib/`; a fresh clone does not need `forge install` or a `.gitmodules` file. Run `forge build` and `forge test` from `contracts/`.
 
 ---
 
 ## 🤖 Telegram Bot Configuration & Webhook Setup
 
-1. **Create Bot:** Message `@BotFather` on Telegram, create a new bot (e.g. `@PactoraEscrowBot`), and obtain your `TELEGRAM_BOT_TOKEN`.
+1. **Create Bot:** Use `@BotFather` and configure the actual `TELEGRAM_BOT_USERNAME` and server-only `TELEGRAM_BOT_TOKEN`.
 2. **Set Webhook Secret:** Generate a random 32+ character hex string for `TELEGRAM_WEBHOOK_SECRET`.
-3. **Register Webhook:**
-   ```bash
-   curl -F "url=https://your-domain.vercel.app/api/telegram/webhook" \
-        -F "secret_token=YOUR_TELEGRAM_WEBHOOK_SECRET" \
-        https://api.telegram.org/botYOUR_TELEGRAM_BOT_TOKEN/setWebhook
-   ```
+3. **Register Webhook:** Use `curl.exe` with secrets loaded from your local environment, never literal credentials in shell history. Register the production `/api/telegram/webhook` URL using Telegram's `setWebhook` method and inspect `getWebhookInfo` for errors.
 4. **Supported Commands:**
    - `/start` — Welcome message and instructions
-   - `/start link_<token>` — Connect Telegram account to wallet address
-   - `/notifications` — View active notification status
+    - `/start link_<token>` — Connect Telegram account to wallet address
+    - `/agreements` - List linked agreement metadata
+    - `/notifications` - Toggle notification preferences
    - `/unlink` — Disconnect Telegram account
    - `/help` — Protocol command guide
 
@@ -239,10 +235,12 @@ Once deployed, copy the output contract address to `NEXT_PUBLIC_PACTORA_ESCROW_A
 
 - **Checks-Effects-Interactions:** State transitions are committed before external token operations.
 - **Safe Token Transfers:** SafeERC20 wrapper mitigates non-standard ERC-20 return values.
-- **Mutual Consent Settlement:** Invariant $\text{refund} + \text{release} == \text{escrowRemaining}$ prevents unauthorized capital leakage or fund entrapment.
+- **Mutual Consent Settlement:** Invariant $\text{refund} + \text{release} == \text{escrowRemaining}$ protects accounting. It does not prevent funds being stuck when a party disappears.
 - **Single-Use Linking Tokens:** Expire in 15 minutes and use SHA-256 hash storage.
-- **Timing Attack Mitigation:** Webhook secrets are validated using `crypto.timingSafeEqual`.
-- **SIWE-Compliant Nonces:** Wallet authentication uses single-use expiring nonces to prevent replay attacks.
+- **Webhook Authentication:** Secret-token header verification, not HMAC. Constant-time verification is a required release gate.
+- **SIWE-Style Signed Nonce:** Custom wallet authentication message, **not EIP-4361/SIWE compliant**. Replay protection and session authorization are required release gates.
+
+This is testnet-only, unaudited software. Current source audit and live verification must finish before any submission claims of readiness.
 
 For full threat models and analysis, see [docs/security.md](docs/security.md).
 

@@ -25,7 +25,7 @@ This document is a step-by-step presentation script designed for hackathon judge
 2. **Highlight the value proposition:**
    - "Work agreed. Funds protected. Payments verified."
    - Point out the real-time Mezo network badge in the navigation header indicating Chain ID 31611.
-   - Show the interactive **Live Escrow Simulator** on the landing page, demonstrating how milestone releases update remaining balances and release verified payments.
+    - The homepage preview is **"Illustration, not real funds"**. It sends no transactions and must never be shown as proof of a live payout.
 3. Click **"Launch App"** or **"Dashboard"**.
 
 ---
@@ -35,12 +35,11 @@ This document is a step-by-step presentation script designed for hackathon judge
 2. Connect your wallet using the top-right button.
 3. Click **"Generate Link Token"**:
    - Note the single-use 15-minute token generated securely via CSPRNG.
-   - Click the deep-link button **"Open in Telegram (@PactoraEscrowBot)"**.
+   - Click the deep-link button **"Open in Telegram (@PactoraAlertsBot)"**.
 4. In Telegram, the bot displays the `/start` command with the token:
    - Send the message.
    - The bot responds instantly: *"Account successfully linked to wallet 0x123...!"*
-5. Return to the browser and click **"Send Test Alert"**:
-   - A real Telegram message pings your device immediately, confirming webhook and bot readiness.
+5. Return to the browser and inspect the link status. Use **"Send Test Alert"** only if test notifications were explicitly enabled; production disables this endpoint by default. A test alert is not a chain payment notification.
 
 ---
 
@@ -53,12 +52,12 @@ This document is a step-by-step presentation script designed for hackathon judge
 3. Configure the Milestone Breakdown:
    - **Milestone 1:** "Architecture Design & Schema Specification" — `250 MUSD`
    - **Milestone 2:** "Smart Contract Development & Foundry Tests" — `500 MUSD`
-   - **Milestone 3:** "Frontend Integration & Mainnet Verification" — `250 MUSD`
-4. Note that the application computes real-time agreement totals (`1,000 MUSD`) and calculates the cryptographic SHA-256 hash of the terms for immutable on-chain anchoring.
+    - **Milestone 3:** "Frontend Integration & Testnet Verification" - `250 MUSD`
+4. These are **Illustration** amounts for planning the recording. Use only the real balances available in your two test wallets. The application anchors terms with `keccak256` of the JSON terms; SHA-256 is used for link tokens, not agreement terms.
 5. Click **"Deploy Agreement"**:
    - The wallet prompts for transaction signature on `PactoraEscrow.createAgreement(...)`.
    - On confirmation, the agreement details page loads (`/agreements/[id]`).
-   - The Telegram bot delivers an agreement creation notice to both parties.
+    - Record a creation notification only if it was actually delivered after chain confirmation. Do not invent a notification or transaction hash.
 
 ---
 
@@ -100,5 +99,4 @@ This document is a step-by-step presentation script designed for hackathon judge
 
 - **Non-Custodial & Invariant-Enforced:** Funds are never controlled by Pactora servers; all releases follow strict Solidity state machine rules.
 - **Tailored for Mezo:** Built specifically around Bitcoin gas mechanics and canonical MUSD escrow.
-- **Production UX:** Complete responsive design, real web3 state management (no fake counters), and bidirectional Telegram messaging.
-
+- **Testnet UX:** Record only confirmed transactions and messages actually received. The labelled homepage illustration is not a live demo.

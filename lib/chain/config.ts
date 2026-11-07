@@ -1,6 +1,5 @@
 import { defineChain } from "viem";
-import { http, createConfig } from "wagmi";
-import { injected } from "@wagmi/core";
+import { http, createConfig, injected } from "wagmi";
 
 /**
  * Official Mezo Testnet chain definition
@@ -51,4 +50,3 @@ export const wagmiConfig = createConfig({
   },
   ssr: true,
 });
-

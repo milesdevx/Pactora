@@ -5,6 +5,8 @@ node_modules/
 # Next.js
 .next/
 out/
+*.tsbuildinfo
+.vercel/
 
 # Environment files
 .env
@@ -15,9 +17,13 @@ out/
 # Testing & Coverage
 coverage/
 .vitest/
+playwright-report/
+test-results/
+.taste-skill/
 # Foundry
 contracts/out/
 contracts/cache/
+contracts/broadcast/
 
 # System & OS
 .agents
@@ -25,6 +31,3 @@ contracts/cache/
 .DS_Store
 Thumbs.db
 *.log
-
-.vercel
-.env*

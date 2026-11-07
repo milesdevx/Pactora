@@ -143,6 +143,21 @@ export default function HelpPage() {
       {/* Safety & Mutual Consent */}
       <Card className="border-slate-800 bg-[#0f172a]">
         <CardHeader>
+          <CardTitle className="text-base">Telegram Commands</CardTitle>
+          <CardDescription>Link your wallet from Settings, then use these commands in a private bot chat.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm text-slate-300">
+          <p><code>/start</code>: Welcome and wallet-linking instructions.</p>
+          <p><code>/start link_&lt;token&gt;</code>: Consume the one-time link from Settings.</p>
+          <p><code>/agreements</code>: List linked agreement metadata.</p>
+          <p><code>/notifications</code>: Toggle notifications.</p>
+          <p><code>/unlink</code>: Disconnect your Telegram account.</p>
+          <p><code>/help</code>: Command guide and wallet safety.</p>
+        </CardContent>
+      </Card>
+
+      <Card className="border-slate-800 bg-[#0f172a]">
+        <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
             <Scale className="h-4 w-4 text-amber-400" />
             Dispute Handling & Mutual Consent
@@ -166,4 +181,3 @@ export default function HelpPage() {
     </div>
   );
 }
-

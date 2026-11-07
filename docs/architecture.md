@@ -47,24 +47,24 @@ graph TB
 
 ## 2. Smart Contract State Machine
 
-The core escrow logic is governed by `PactoraEscrow.sol`, ensuring that funds cannot be locked or drained arbitrarily.
+The core escrow logic is governed by `PactoraEscrow.sol`. Funds can remain locked if a party disappears; there is currently no timeout withdrawal or provider-no-show refund.
 
 ### Agreement States
 - **Created (0):** The agreement is initialized by the creator specifying the client, provider, milestone breakdown, and terms hash (`keccak256`).
 - **Accepted (1):** The provider counter-party signs acceptance of the terms.
 - **Funded (2):** The client deposits the total agreement amount in MUSD using safe ERC-20 transfer. Funds are held in contract escrow.
-- **Completed (3):** All milestones have reached `Approved` state and total funds have been disbursed to the provider (or mutual resolution executed).
-- **Cancelled (4):** The client cancels an unfunded agreement, or a mutual refund resolves 100% back to the client.
+- **Completed (3):** All milestones have reached `Approved` state and total funds have been disbursed to the provider.
+- **Cancelled (4):** Either party cancels an unfunded agreement, or any mutual-consent split is accepted, including a 100% provider release.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Created: Client creates agreement
     Created --> Accepted: Provider calls acceptAgreement()
-    Created --> Cancelled: Client calls cancelUnfundedAgreement()
-    Accepted --> Cancelled: Client calls cancelUnfundedAgreement()
+    Created --> Cancelled: Either party calls cancelUnfundedAgreement()
+    Accepted --> Cancelled: Either party calls cancelUnfundedAgreement()
     Accepted --> Funded: Client approves & deposits MUSD
     Funded --> Completed: All milestones approved & released
-    Funded --> Completed: Mutual consent resolution approved
+    Funded --> Cancelled: acceptResolutionProposal() executes mutual split
 ```
 
 ### Milestone Lifecycle
@@ -85,17 +85,17 @@ stateDiagram-v2
 
 ## 3. Mutual Consent Dispute Resolution
 
-If work is contested or scope changes occur mid-project, Pactora does not rely on arbitrary or centralized oracle intervention. Instead, it implements a cryptographic **mutual consent settlement engine**:
+If work is contested or scope changes occur mid-project, Pactora implements an **on-chain mutual-consent split**, not a subjective dispute engine:
 
 1. Either party (client or provider) calls `proposeResolution(agreementId, clientRefund, providerRelease)`.
 2. The contract validates the fundamental economic invariant:
    $$\text{clientRefund} + \text{providerRelease} = \text{totalAmount} - \text{releasedAmount} - \text{refundedAmount}$$
 3. The opposing party reviews the proposed split on-chain.
-4. When the counter-party executes `acceptResolution(agreementId)`, the smart contract atomically:
+4. When the counter-party executes `acceptResolutionProposal(agreementId)`, the smart contract atomically:
    - Transfers $\text{clientRefund}$ MUSD back to the client.
    - Transfers $\text{providerRelease}$ MUSD to the provider.
-   - Marks the agreement state as `Completed`.
-   - Emits `ResolutionExecuted(agreementId, clientRefund, providerRelease)`.
+    - Marks the agreement state as `Cancelled` for every split.
+    - Emits `ResolutionAccepted(agreementId, clientRefund, providerRelease)` and `AgreementCancelled`.
 
 ---
 
@@ -141,4 +141,3 @@ sequenceDiagram
 | **Backup RPC** | `https://mezo-testnet.drpc.org` | Secondary failover endpoint |
 | **Block Explorer**| `https://explorer.test.mezo.org`| Blockscout-based Mezo explorer |
 | **Canonical MUSD**| `0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503` | Verified Mezo Testnet ERC-20 contract |
-
