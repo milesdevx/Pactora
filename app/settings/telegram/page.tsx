@@ -53,7 +53,7 @@ export default function TelegramSettingsPage() {
     </CardContent></Card>
     <Card className="border-slate-800 bg-[#0f172a]"><CardHeader><CardTitle>Notification Safety</CardTitle><CardDescription>Chain alerts are queued only after successful Mezo Testnet receipt verification. Telegram delivery is best-effort; chain state remains authoritative.</CardDescription></CardHeader><CardContent className="space-y-3 text-sm text-slate-300">
       <p>Never provide a seed phrase or private key to the bot. Sign transactions only in your wallet through Pactora.</p>
-      <p>Use /help, /agreements, /notifications, and /unlink in your private bot chat.</p>
+      <p>Use /help, /balance, /agreements, /pending, /getmusd, /notifications, and /unlink in your private bot chat.</p>
       {status.data?.testNotificationsEnabled && status.data.linked ? <><label htmlFor="test-message">Optional test message, not a payment</label><Input id="test-message" maxLength={500} value={testMessage} onChange={(event) => setTestMessage(event.target.value)} /><Button variant="outline" isLoading={busy} onClick={() => { void act("test"); }}>Send Test Alert</Button></> : <p>Test notifications are hidden unless explicitly enabled on this deployment. Arbitrary chat-ID targets are not accepted.</p>}
     </CardContent></Card>
   </div>;

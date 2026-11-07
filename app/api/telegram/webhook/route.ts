@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     const privateMessage = message?.chat.type === "private" && message.from?.id === message.chat.id && !message.from.is_bot;
     const [rawCommand = "", argument] = message?.text?.trim().split(/\s+/) || [];
     const parsedCommand = rawCommand.split("@")[0].toLowerCase();
-    const command = ["/start", "/help", "/agreements", "/notifications", "/unlink"].includes(parsedCommand) ? parsedCommand : "/help";
+    const command = ["/start", "/help", "/balance", "/agreements", "/pending", "/getmusd", "/notifications", "/unlink"].includes(parsedCommand) ? parsedCommand : "/help";
     const token = command === "/start" && argument?.startsWith("link_") ? argument.slice(5) : undefined;
     if (privateMessage) await enforceRateLimit(req, "telegram:webhook", 60, 60, String(message.chat.id));
     // Raw Telegram payloads and bearer link tokens are never persisted or logged.

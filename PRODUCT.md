@@ -33,7 +33,7 @@ Pactora is a payment coordination and trust-minimized milestone escrow tool on t
 
 - **On-chain Escrow**: Agreements funded in MUSD held by `PactoraEscrow.sol`.
 - **Milestone Workflow**: Provider acceptance -> Client MUSD funding -> Provider submission with evidence -> Client approval & release or rejection with reason -> Final completion or mutual-consent cancellation.
-- **Telegram Bot**: Account linking through `/start link_<token>`, `/start`, `/help`, `/agreements`, `/unlink`, `/notifications`. Server authentication hardening is under review; `/link` is not a command.
+- **Telegram Bot**: Signed-session linking through `/start link_<token>`, `/start`, `/help`, `/balance`, `/agreements`, `/pending`, `/getmusd`, `/unlink`, `/notifications`. New commands are implemented locally; live verification awaits deployment. `/link` is not a command.
 - **Receipts**: Public read-only verifiable receipt page tied directly to on-chain transaction hashes and explorer links.
 - **No fake transaction success**: Application balances and transactions must come from the chain. The homepage preview is labelled "Illustration, not real funds" and sends no transactions.
 

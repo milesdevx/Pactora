@@ -4,14 +4,14 @@ import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { telegramLinkTokens, telegramLinks, users, webhookEvents } from "@/lib/db/schema";
 import { ApiError, getAppUrl } from "@/lib/security/api";
-import { listVerifiedAgreements } from "@/lib/chain/metadata";
-import { escapeHtml } from "./bot";
 import { queueMessage, sendNotificationJobs } from "./notifications";
+import { formatAgreements, formatBalance, formatGetMusd, formatPending } from "./formatters";
+import { readWalletAgreements, readWalletBalance } from "./chain-reads";
 
 const CommandSchema = z.object({ chatId: z.string().regex(/^[1-9]\d*$/), command: z.string().max(64), username: z.string().max(64).optional(), tokenHash: z.string().regex(/^[0-9a-f]{64}$/).optional(), hasArgument: z.boolean() });
 type Command = z.infer<typeof CommandSchema>;
 
-export const BOT_HELP = `<b>Pactora on Mezo Testnet</b>\n\n/start - Welcome and linking instructions\n/agreements - Confirmed state of registered agreements\n/notifications - Toggle alerts\n/unlink - Disconnect your wallet\n/help - Commands and safety\n\nTransactions are signed only in Pactora, never in Telegram. Never share a seed phrase or private key.`;
+export const BOT_HELP = `<b>Pactora on Mezo Testnet</b>\n\n/start - Welcome and wallet linking\n/balance - Linked wallet's MUSD and BTC gas\n/agreements - On-chain states and next actions\n/pending - Work needing your review or delivery\n/getmusd - Test BTC/MUSD guide\n/notifications - Toggle confirmed-event alerts\n/unlink - Disconnect your wallet\n/help - Commands and safety\n\nTransactions are signed only in Pactora, never in Telegram. Never share a seed phrase or private key.`;
 
 export async function linkTelegramToken(tokenHash: string, chatId: string, username?: string) {
   return db.transaction(async (tx) => {
@@ -38,7 +38,8 @@ export async function executeCommand(command: Command): Promise<string> {
     if (command.hasArgument) return `Link token invalid or expired. Generate a fresh link at <a href="${getAppUrl()}/settings/telegram">Telegram settings</a>.`;
     return `${BOT_HELP}\n\n<a href="${getAppUrl()}/settings/telegram">Connect and sign in with your wallet, then link Telegram</a>.`;
   }
-  if (command.command === "/help") return BOT_HELP;
+  if (command.command === "/help") return `${BOT_HELP}\n\n${formatGetMusd(getAppUrl())}`;
+  if (command.command === "/getmusd") return formatGetMusd(getAppUrl());
   if (command.command === "/unlink") {
     const removed = await db.transaction(async (tx) => {
       const links = await tx.delete(telegramLinks).where(eq(telegramLinks.telegramChatId, chatId)).returning({ userId: telegramLinks.userId });
@@ -52,13 +53,13 @@ export async function executeCommand(command: Command): Promise<string> {
       .where(and(eq(telegramLinks.telegramChatId, chatId), eq(telegramLinks.walletVerified, true))).returning({ enabled: telegramLinks.notificationsEnabled });
     return link ? `<b>Notifications ${link.enabled ? "enabled" : "muted"}</b>` : "Link your wallet from Telegram settings first.";
   }
-  if (command.command === "/agreements") {
+  if (["/balance", "/agreements", "/pending"].includes(command.command)) {
     const [user] = await db.select({ wallet: users.walletAddress }).from(telegramLinks).innerJoin(users, eq(telegramLinks.userId, users.id)).where(and(eq(telegramLinks.telegramChatId, chatId), eq(telegramLinks.walletVerified, true))).limit(1);
     if (!user) return "Link your wallet from Telegram settings first.";
-    const agreements = await listVerifiedAgreements(user.wallet);
-    if (!agreements.length) return "<b>Your agreements</b>\nNo verified registered agreements found for your linked wallet. Chain and metadata discovery must not be replaced with fabricated items.";
-    const states = ["Created", "Accepted", "Funded", "Completed", "Cancelled"];
-    return `<b>Your agreements</b>\n\n${agreements.slice(0, 10).map((agreement) => `#${agreement.onChainId}: ${escapeHtml(agreement.title)}\n${states[agreement.state]} | ${agreement.totalAmount} MUSD\n<a href="${getAppUrl()}/agreements/${agreement.onChainId}">Open agreement</a>`).join("\n\n")}`;
+    const wallet = user.wallet.toLowerCase() as `0x${string}`;
+    if (command.command === "/balance") { const balance = await readWalletBalance(wallet); return formatBalance(wallet, balance.musd, balance.btc, balance.blockNumber, getAppUrl()); }
+    const data = await readWalletAgreements(wallet);
+    return command.command === "/pending" ? formatPending(data.agreements, wallet, getAppUrl(), data.complete) : formatAgreements(data.agreements, wallet, getAppUrl(), data.complete);
   }
   return BOT_HELP;
 }

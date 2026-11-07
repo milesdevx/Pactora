@@ -142,6 +142,16 @@ export default function HelpPage() {
 
       {/* Safety & Mutual Consent */}
       <Card className="border-slate-800 bg-[#0f172a]">
+        <CardHeader><CardTitle className="text-base">Get Test BTC and MUSD</CardTitle><CardDescription>The same guide is available in Telegram with /getmusd.</CardDescription></CardHeader>
+        <CardContent className="space-y-3 text-sm text-slate-300">
+          <p>Select Mezo Testnet, chain 31611, in your wallet.</p>
+          <p>Get test BTC from the <a href="https://faucet.test.mezo.org/" target="_blank" rel="noreferrer" className="text-teal-300 underline">Mezo faucet</a> using your wallet address and CAPTCHA. The faucet offers BTC/MEZO, not direct MUSD.</p>
+          <p>Open the <a href="https://testnet.mezo.org" target="_blank" rel="noreferrer" className="text-teal-300 underline">Mezo testnet app</a> and swap test BTC for MUSD or open a BTC-backed MUSD loan. Borrowing has a minimum debt requirement; review the app terms.</p>
+          <p>Keep test BTC for gas, then approve and fund your escrow with MUSD. Test tokens only; no real funds or yield are promised.</p>
+        </CardContent>
+      </Card>
+
+      <Card className="border-slate-800 bg-[#0f172a]">
         <CardHeader>
           <CardTitle className="text-base">Telegram Commands</CardTitle>
           <CardDescription>Link your wallet from Settings, then use these commands in a private bot chat.</CardDescription>
@@ -149,10 +159,13 @@ export default function HelpPage() {
         <CardContent className="space-y-2 text-sm text-slate-300">
           <p><code>/start</code>: Welcome and wallet-linking instructions.</p>
           <p><code>/start link_&lt;token&gt;</code>: Consume the one-time link from Settings.</p>
-          <p><code>/agreements</code>: List linked agreement metadata.</p>
+          <p><code>/agreements</code>: Confirm on-chain states and show the next action.</p>
+          <p><code>/balance</code>: Read your linked wallet&apos;s canonical MUSD and test BTC gas balances.</p>
+          <p><code>/pending</code>: Show funded milestones needing your review or delivery.</p>
+          <p><code>/getmusd</code>: Guide to the Mezo faucet and testnet swap/borrowing app.</p>
           <p><code>/notifications</code>: Toggle notifications.</p>
           <p><code>/unlink</code>: Disconnect your Telegram account.</p>
-          <p><code>/help</code>: Command guide and wallet safety.</p>
+          <p><code>/help</code>: Command guide, test-funds instructions and wallet safety.</p>
         </CardContent>
       </Card>
 

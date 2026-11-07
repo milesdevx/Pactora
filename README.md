@@ -179,7 +179,7 @@ Run the TypeScript unit tests:
 ```powershell
 pnpm.cmd test
 ```
-Phase B run on **2026-11-07**: **118 passed, 0 failed**; Playwright desktop/mobile smoke: **2 passed**. Unit fixtures are Illustration, not live transaction evidence.
+P0 run on **2026-11-07**: **125 passed, 0 failed**. Phase B Playwright desktop/mobile smoke: **2 passed**. Unit fixtures are Illustration, not live transaction evidence.
 - Validation schemas (Zod)
 - Cryptographic nonce & token hashing
 - UI component rendering and interaction
@@ -224,7 +224,10 @@ OpenZeppelin and forge-std sources are committed under `contracts/lib/`; a fresh
 4. **Supported Commands:**
    - `/start` — Welcome message and instructions
     - `/start link_<token>` — Connect Telegram account to wallet address
-    - `/agreements` - List linked agreement metadata
+    - `/agreements` - Confirm on-chain agreement states and next actions
+    - `/balance` - Canonical MUSD and test BTC gas balance for the linked wallet
+    - `/pending` - Funded milestones needing review or delivery
+    - `/getmusd` - Mezo testnet faucet and swap/borrowing guide
     - `/notifications` - Toggle notification preferences
    - `/unlink` — Disconnect Telegram account
    - `/help` — Protocol command guide
@@ -241,6 +244,8 @@ OpenZeppelin and forge-std sources are committed under `contracts/lib/`; a fresh
 - **SIWE-Style Signed Nonce:** Custom wallet authentication message, **not EIP-4361/SIWE compliant**. Replay protection and session authorization are required release gates.
 
 This is testnet-only, unaudited software. V2 security fixes, seven-day review claims and agreed-deadline refunds are implemented locally; they require an owner-run redeploy and live verification before submission readiness can be claimed. V1 remains read-only and is not retroactively fixed.
+
+Bot discovery combines registered metadata with the first 50 on-chain agreement IDs, confirming parties and state through Mezo RPC. It labels incomplete discovery. A production event indexer and MEZO-token funding UI are roadmap items, not implemented integrations. Read-only bot commands link to the app and explorer but never invent a transaction hash.
 
 For full threat models and analysis, see [docs/security.md](docs/security.md).
 
