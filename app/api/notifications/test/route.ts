@@ -1,17 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendTelegramMessage } from "@/lib/telegram/bot";
-import { z } from "zod";
+import { TestNotificationSchema } from "@/lib/validation/schemas";
+import { ApiError, apiError, readJson, requireSameOrigin } from "@/lib/security/api";
+import { requireSession } from "@/lib/security/session";
+import { enforceRateLimit } from "@/lib/security/rate-limit";
+import { db } from "@/lib/db";
+import { telegramLinks } from "@/lib/db/schema";
+import { and, eq } from "drizzle-orm";
+import { escapeHtml } from "@/lib/telegram/bot";
 
 export const dynamic = "force-dynamic";
 
-const TestNotificationSchema = z.object({
-  chatId: z.string().or(z.number()),
-  message: z.string().min(1).max(500).optional(),
-});
-
 export async function POST(req: NextRequest) {
   // Guard: disable in production unless explicitly authorized
-  if (process.env.NODE_ENV === "production" && !process.env.ALLOW_TEST_NOTIFICATIONS) {
+  if (process.env.NODE_ENV === "production" && process.env.ALLOW_TEST_NOTIFICATIONS !== "true") {
     return NextResponse.json(
       { error: "Forbidden: Test notifications are disabled in production" },
       { status: 403 }
@@ -19,25 +21,20 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const body = await req.json();
-    const result = TestNotificationSchema.safeParse(body);
-
-    if (!result.success) {
-      return NextResponse.json(
-        { error: "Validation failed", details: result.error.flatten().fieldErrors },
-        { status: 400 }
-      );
-    }
-
-    const { chatId, message } = result.data;
+    requireSameOrigin(req);
+    const session = await requireSession(req);
+    const { message } = await readJson(req, TestNotificationSchema);
+    await enforceRateLimit(req, "notifications:test", 3, 60, session.walletAddress);
+    const [link] = await db.select().from(telegramLinks).where(and(eq(telegramLinks.userId, session.userId), eq(telegramLinks.walletVerified, true))).limit(1);
+    if (!link || !link.notificationsEnabled) throw new ApiError(409, "Link Telegram and enable notifications first", "TELEGRAM_NOT_LINKED");
     const testMessage =
-      message ||
-      `🧪 <b>Pactora Notification Test</b>\n\n` +
+      (message ? `<b>Test notification, not a chain event</b>\n\n${escapeHtml(message)}` :
+      `<b>Pactora Test Notification, not a chain event</b>\n\n` +
         `This is a test notification confirming your Telegram Bot connection is configured properly.\n` +
         `Network: <b>Mezo Testnet</b>\n` +
-        `Time: ${new Date().toISOString()}`;
+        `Time: ${new Date().toISOString()}`);
 
-    const sent = await sendTelegramMessage(chatId, testMessage);
+    const sent = await sendTelegramMessage(link.telegramChatId, testMessage);
 
     if (!sent) {
       return NextResponse.json(
@@ -47,9 +44,7 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ success: true, message: "Notification delivered" });
-  } catch (err) {
-    console.error("Test notification error:", err);
-    return NextResponse.json({ error: "Failed to process test notification" }, { status: 500 });
+  } catch (error) {
+    return apiError(error);
   }
 }
-

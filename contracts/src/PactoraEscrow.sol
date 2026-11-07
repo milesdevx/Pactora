@@ -14,19 +14,23 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 contract PactoraEscrow is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
+    uint256 public constant VERSION = 2;
+    uint64 public constant REVIEW_WINDOW = 7 days;
+
     enum AgreementState {
-        Created,    // Agreement created by client, awaiting provider acceptance
-        Accepted,   // Provider accepted terms, awaiting client funding
-        Funded,     // Client funded escrow, milestone work in progress
-        Completed,  // All milestones approved and released
-        Cancelled   // Agreement cancelled or resolved via mutual consent
+        Created, // Agreement created by client, awaiting provider acceptance
+        Accepted, // Provider accepted terms, awaiting client funding
+        Funded, // Client funded escrow, milestone work in progress
+        Completed, // All escrow funds released to provider
+        Cancelled // Agreement cancelled before funding or closed with a refund
     }
 
     enum MilestoneState {
-        Pending,    // Work not submitted or milestone pending
-        Submitted,  // Provider submitted deliverable hash/notes
-        Approved,   // Client approved milestone; funds released to provider
-        Rejected    // Client rejected milestone; provider may resubmit
+        Pending, // Work not submitted or milestone pending
+        Submitted, // Provider submitted deliverable hash/notes
+        Approved, // Client approved milestone; funds released to provider
+        Rejected, // Client rejected milestone; provider may resubmit within grace period
+        Refunded // Client reclaimed this milestone after provider no-show
     }
 
     struct Milestone {
@@ -34,6 +38,9 @@ contract PactoraEscrow is ReentrancyGuard {
         MilestoneState state;
         bytes32 submissionHash;
         bytes32 rejectionReasonHash;
+        uint64 deliveryDeadline;
+        uint64 submittedAt;
+        uint64 rejectedAt;
     }
 
     struct Agreement {
@@ -57,6 +64,7 @@ contract PactoraEscrow is ReentrancyGuard {
         address proposedBy;
         uint256 clientRefundAmount;
         uint256 providerReleaseAmount;
+        bytes32 proposalHash;
     }
 
     // --- State Variables ---
@@ -64,8 +72,10 @@ contract PactoraEscrow is ReentrancyGuard {
     mapping(uint256 => Agreement) private _agreements;
     mapping(uint256 => mapping(uint256 => Milestone)) private _milestones;
     mapping(uint256 => ResolutionProposal) private _resolutionProposals;
+    // Kept separately so deleting a proposal never reuses its identity.
+    mapping(uint256 => uint256) private _resolutionNonces;
 
-    // Optional token allowlist (if empty or allowed, permits usage)
+    // When enforced, only explicitly allowed token contracts may be used.
     address public immutable defaultToken;
     address public immutable owner;
     mapping(address => bool) public allowedTokens;
@@ -85,14 +95,19 @@ contract PactoraEscrow is ReentrancyGuard {
     event MilestoneSubmitted(uint256 indexed agreementId, uint256 indexed milestoneIndex, bytes32 submissionHash);
     event MilestoneApproved(uint256 indexed agreementId, uint256 indexed milestoneIndex, uint256 amount);
     event MilestoneRejected(uint256 indexed agreementId, uint256 indexed milestoneIndex, bytes32 reasonHash);
+    event MilestoneTimeoutClaimed(uint256 indexed agreementId, uint256 indexed milestoneIndex, uint256 amount);
+    event MilestoneRefunded(uint256 indexed agreementId, uint256 indexed milestoneIndex, uint256 amount);
     event ResolutionProposed(
         uint256 indexed agreementId,
         address indexed proposedBy,
         uint256 clientRefund,
-        uint256 providerRelease
+        uint256 providerRelease,
+        bytes32 proposalHash
     );
-    event ResolutionAccepted(uint256 indexed agreementId, uint256 clientRefund, uint256 providerRelease);
-    event ResolutionCancelled(uint256 indexed agreementId, address indexed cancelledBy);
+    event ResolutionAccepted(
+        uint256 indexed agreementId, uint256 clientRefund, uint256 providerRelease, bytes32 proposalHash
+    );
+    event ResolutionCancelled(uint256 indexed agreementId, address indexed cancelledBy, bytes32 proposalHash);
     event AgreementCancelled(uint256 indexed agreementId, address indexed cancelledBy, uint256 refundAmount);
     event AgreementCompleted(uint256 indexed agreementId);
     event TokenAllowlistUpdated(address indexed token, bool allowed);
@@ -115,6 +130,14 @@ contract PactoraEscrow is ReentrancyGuard {
     error ProposalAlreadyPending();
     error CannotAcceptOwnProposal();
     error NotOwner();
+    error InvalidDeliveryDeadline();
+    error DeliveryDeadlinePassed();
+    error DeliveryDeadlineNotReached();
+    error ReviewWindowOpen();
+    error ReviewWindowClosed();
+    error MilestoneNotRefundable();
+    error ProposalHashMismatch();
+    error InexactTokenTransfer();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -127,20 +150,19 @@ contract PactoraEscrow is ReentrancyGuard {
      * @param _enforceAllowlist Whether to strictly enforce the token allowlist
      */
     constructor(address _defaultToken, bool _enforceAllowlist) {
+        if (_defaultToken == address(0) || _defaultToken.code.length == 0) revert InvalidAddress();
         owner = msg.sender;
         defaultToken = _defaultToken;
         enforceTokenAllowlist = _enforceAllowlist;
-        if (_defaultToken != address(0)) {
-            allowedTokens[_defaultToken] = true;
-            emit TokenAllowlistUpdated(_defaultToken, true);
-        }
+        allowedTokens[_defaultToken] = true;
+        emit TokenAllowlistUpdated(_defaultToken, true);
     }
 
     /**
      * @notice Admin function to configure allowed tokens
      */
     function setTokenAllowed(address token, bool allowed) external onlyOwner {
-        if (token == address(0)) revert InvalidAddress();
+        if (token == address(0) || (allowed && token.code.length == 0)) revert InvalidAddress();
         allowedTokens[token] = allowed;
         emit TokenAllowlistUpdated(token, allowed);
     }
@@ -149,10 +171,8 @@ contract PactoraEscrow is ReentrancyGuard {
      * @notice Check whether a token is allowed for agreement creation
      */
     function isTokenAllowed(address token) public view returns (bool) {
-        if (!enforceTokenAllowlist) {
-            return token != address(0) && token.code.length > 0;
-        }
-        return allowedTokens[token];
+        if (token == address(0) || token.code.length == 0) return false;
+        return !enforceTokenAllowlist || allowedTokens[token];
     }
 
     /**
@@ -160,17 +180,22 @@ contract PactoraEscrow is ReentrancyGuard {
      * @param provider Address of the freelancer/contractor
      * @param token ERC-20 token address (e.g. MUSD)
      * @param milestoneAmounts Array of individual milestone payout amounts
+     * @param deliveryDeadlines Future per-milestone deadlines, consented to on provider acceptance
      * @param termsHash Hash of the agreed specifications/terms
      */
     function createAgreement(
         address provider,
         address token,
         uint256[] calldata milestoneAmounts,
+        uint64[] calldata deliveryDeadlines,
         bytes32 termsHash
     ) external returns (uint256 agreementId) {
         if (provider == address(0) || provider == msg.sender) revert InvalidAddress();
         if (!isTokenAllowed(token)) revert TokenNotAllowed();
-        if (milestoneAmounts.length == 0 || milestoneAmounts.length > 50) revert InvalidMilestones();
+        if (
+            milestoneAmounts.length == 0 || milestoneAmounts.length > 50
+                || deliveryDeadlines.length != milestoneAmounts.length
+        ) revert InvalidMilestones();
 
         uint256 total = 0;
         agreementId = nextAgreementId++;
@@ -178,13 +203,17 @@ contract PactoraEscrow is ReentrancyGuard {
         for (uint256 i = 0; i < milestoneAmounts.length; i++) {
             uint256 amount = milestoneAmounts[i];
             if (amount == 0) revert InvalidMilestones();
+            if (deliveryDeadlines[i] <= block.timestamp) revert InvalidDeliveryDeadline();
             total += amount;
 
             _milestones[agreementId][i] = Milestone({
                 amount: amount,
                 state: MilestoneState.Pending,
                 submissionHash: bytes32(0),
-                rejectionReasonHash: bytes32(0)
+                rejectionReasonHash: bytes32(0),
+                deliveryDeadline: deliveryDeadlines[i],
+                submittedAt: 0,
+                rejectedAt: 0
             });
         }
 
@@ -234,14 +263,27 @@ contract PactoraEscrow is ReentrancyGuard {
         if (agreement.state != AgreementState.Accepted) {
             revert InvalidAgreementState(AgreementState.Accepted, agreement.state);
         }
+        for (uint256 i = 0; i < agreement.milestoneCount; i++) {
+            if (block.timestamp >= _milestones[agreementId][i].deliveryDeadline) revert DeliveryDeadlinePassed();
+        }
+
+        IERC20 token = IERC20(agreement.token);
+        uint256 senderBefore = token.balanceOf(msg.sender);
+        uint256 escrowBefore = token.balanceOf(address(this));
 
         agreement.state = AgreementState.Funded;
         agreement.fundedAt = uint64(block.timestamp);
 
         emit AgreementFunded(agreementId, msg.sender, agreement.totalAmount);
 
-        // Safe transfer tokens from client to this escrow contract
-        IERC20(agreement.token).safeTransferFrom(msg.sender, address(this), agreement.totalAmount);
+        token.safeTransferFrom(msg.sender, address(this), agreement.totalAmount);
+
+        uint256 senderAfter = token.balanceOf(msg.sender);
+        uint256 escrowAfter = token.balanceOf(address(this));
+        if (
+            senderAfter > senderBefore || senderBefore - senderAfter != agreement.totalAmount
+                || escrowAfter < escrowBefore || escrowAfter - escrowBefore != agreement.totalAmount
+        ) revert InexactTokenTransfer();
     }
 
     /**
@@ -250,11 +292,7 @@ contract PactoraEscrow is ReentrancyGuard {
      * @param milestoneIndex Index of milestone (0-indexed)
      * @param submissionHash Hash/URI reference to deliverable evidence
      */
-    function submitMilestone(
-        uint256 agreementId,
-        uint256 milestoneIndex,
-        bytes32 submissionHash
-    ) external {
+    function submitMilestone(uint256 agreementId, uint256 milestoneIndex, bytes32 submissionHash) external {
         Agreement storage agreement = _agreements[agreementId];
         if (agreement.id == 0) revert AgreementDoesNotExist();
         if (msg.sender != agreement.provider) revert NotProvider();
@@ -264,15 +302,16 @@ contract PactoraEscrow is ReentrancyGuard {
         if (milestoneIndex >= agreement.milestoneCount) revert MilestoneOutOfBounds();
 
         Milestone storage milestone = _milestones[agreementId][milestoneIndex];
-        if (
-            milestone.state != MilestoneState.Pending &&
-            milestone.state != MilestoneState.Rejected
-        ) {
+        if (milestone.state != MilestoneState.Pending && milestone.state != MilestoneState.Rejected) {
             revert MilestoneNotPendingOrRejected();
         }
+        if (block.timestamp >= _submissionDeadline(milestone)) revert DeliveryDeadlinePassed();
 
         milestone.state = MilestoneState.Submitted;
         milestone.submissionHash = submissionHash;
+        milestone.rejectionReasonHash = bytes32(0);
+        milestone.submittedAt = uint64(block.timestamp);
+        milestone.rejectedAt = 0;
 
         emit MilestoneSubmitted(agreementId, milestoneIndex, submissionHash);
     }
@@ -282,10 +321,7 @@ contract PactoraEscrow is ReentrancyGuard {
      * @param agreementId Agreement ID
      * @param milestoneIndex Index of milestone (0-indexed)
      */
-    function approveMilestone(
-        uint256 agreementId,
-        uint256 milestoneIndex
-    ) external nonReentrant {
+    function approveMilestone(uint256 agreementId, uint256 milestoneIndex) external nonReentrant {
         Agreement storage agreement = _agreements[agreementId];
         if (agreement.id == 0) revert AgreementDoesNotExist();
         if (msg.sender != agreement.client) revert NotClient();
@@ -297,35 +333,53 @@ contract PactoraEscrow is ReentrancyGuard {
         Milestone storage milestone = _milestones[agreementId][milestoneIndex];
         if (milestone.state != MilestoneState.Submitted) revert MilestoneNotSubmitted();
 
-        milestone.state = MilestoneState.Approved;
-        uint256 amount = milestone.amount;
-        agreement.releasedAmount += amount;
+        _releaseMilestone(agreement, milestone, milestoneIndex);
+    }
 
-        // Invariant check: released + refunded <= totalAmount
-        require(
-            agreement.releasedAmount + agreement.refundedAmount <= agreement.totalAmount,
-            "Invariant: exceeded total"
-        );
-
-        emit MilestoneApproved(agreementId, milestoneIndex, amount);
-
-        // Check if all milestones have now been approved
-        bool allApproved = true;
-        for (uint256 i = 0; i < agreement.milestoneCount; i++) {
-            if (_milestones[agreementId][i].state != MilestoneState.Approved) {
-                allApproved = false;
-                break;
-            }
+    /**
+     * @notice Provider claims a submitted milestone after seven days without rejection.
+     */
+    function claimAfterTimeout(uint256 agreementId, uint256 milestoneIndex) external nonReentrant {
+        Agreement storage agreement = _agreements[agreementId];
+        if (agreement.id == 0) revert AgreementDoesNotExist();
+        if (msg.sender != agreement.provider) revert NotProvider();
+        if (agreement.state != AgreementState.Funded) {
+            revert InvalidAgreementState(AgreementState.Funded, agreement.state);
         }
+        if (milestoneIndex >= agreement.milestoneCount) revert MilestoneOutOfBounds();
 
-        if (allApproved) {
-            agreement.state = AgreementState.Completed;
-            agreement.completedAt = uint64(block.timestamp);
-            emit AgreementCompleted(agreementId);
+        Milestone storage milestone = _milestones[agreementId][milestoneIndex];
+        if (milestone.state != MilestoneState.Submitted) revert MilestoneNotSubmitted();
+        if (block.timestamp < uint256(milestone.submittedAt) + REVIEW_WINDOW) revert ReviewWindowOpen();
+
+        emit MilestoneTimeoutClaimed(agreementId, milestoneIndex, milestone.amount);
+        _releaseMilestone(agreement, milestone, milestoneIndex);
+    }
+
+    /**
+     * @notice Client refunds only an undelivered milestone after its delivery or resubmission deadline.
+     */
+    function refundNoShow(uint256 agreementId, uint256 milestoneIndex) external nonReentrant {
+        Agreement storage agreement = _agreements[agreementId];
+        if (agreement.id == 0) revert AgreementDoesNotExist();
+        if (msg.sender != agreement.client) revert NotClient();
+        if (agreement.state != AgreementState.Funded) {
+            revert InvalidAgreementState(AgreementState.Funded, agreement.state);
         }
+        if (milestoneIndex >= agreement.milestoneCount) revert MilestoneOutOfBounds();
 
-        // Transfer funds directly to provider
-        IERC20(agreement.token).safeTransfer(agreement.provider, amount);
+        Milestone storage milestone = _milestones[agreementId][milestoneIndex];
+        if (milestone.state != MilestoneState.Pending && milestone.state != MilestoneState.Rejected) {
+            revert MilestoneNotRefundable();
+        }
+        if (block.timestamp < _submissionDeadline(milestone)) revert DeliveryDeadlineNotReached();
+
+        milestone.state = MilestoneState.Refunded;
+        agreement.refundedAmount += milestone.amount;
+        _invalidateResolutionProposal(agreementId);
+        emit MilestoneRefunded(agreementId, milestoneIndex, milestone.amount);
+        _closeIfSettled(agreement);
+        _transferExact(agreement.token, agreement.client, milestone.amount);
     }
 
     /**
@@ -334,11 +388,7 @@ contract PactoraEscrow is ReentrancyGuard {
      * @param milestoneIndex Index of milestone (0-indexed)
      * @param reasonHash Hash/URI describing why the submission was rejected
      */
-    function rejectMilestone(
-        uint256 agreementId,
-        uint256 milestoneIndex,
-        bytes32 reasonHash
-    ) external {
+    function rejectMilestone(uint256 agreementId, uint256 milestoneIndex, bytes32 reasonHash) external {
         Agreement storage agreement = _agreements[agreementId];
         if (agreement.id == 0) revert AgreementDoesNotExist();
         if (msg.sender != agreement.client) revert NotClient();
@@ -349,9 +399,11 @@ contract PactoraEscrow is ReentrancyGuard {
 
         Milestone storage milestone = _milestones[agreementId][milestoneIndex];
         if (milestone.state != MilestoneState.Submitted) revert MilestoneNotSubmitted();
+        if (block.timestamp >= uint256(milestone.submittedAt) + REVIEW_WINDOW) revert ReviewWindowClosed();
 
         milestone.state = MilestoneState.Rejected;
         milestone.rejectionReasonHash = reasonHash;
+        milestone.rejectedAt = uint64(block.timestamp);
 
         emit MilestoneRejected(agreementId, milestoneIndex, reasonHash);
     }
@@ -369,6 +421,7 @@ contract PactoraEscrow is ReentrancyGuard {
         }
 
         agreement.state = AgreementState.Cancelled;
+        agreement.completedAt = uint64(block.timestamp);
         emit AgreementCancelled(agreementId, msg.sender, 0);
     }
 
@@ -379,11 +432,9 @@ contract PactoraEscrow is ReentrancyGuard {
      * @param clientRefundAmount Amount to return to client
      * @param providerReleaseAmount Amount to release to provider
      */
-    function proposeResolution(
-        uint256 agreementId,
-        uint256 clientRefundAmount,
-        uint256 providerReleaseAmount
-    ) external {
+    function proposeResolution(uint256 agreementId, uint256 clientRefundAmount, uint256 providerReleaseAmount)
+        external
+    {
         Agreement storage agreement = _agreements[agreementId];
         if (agreement.id == 0) revert AgreementDoesNotExist();
         if (msg.sender != agreement.client && msg.sender != agreement.provider) revert NotParty();
@@ -392,25 +443,34 @@ contract PactoraEscrow is ReentrancyGuard {
         }
 
         uint256 remaining = getRemainingBalance(agreementId);
-        if (clientRefundAmount + providerReleaseAmount != remaining) {
+        if (clientRefundAmount > remaining || providerReleaseAmount != remaining - clientRefundAmount) {
             revert InvalidResolutionAmounts();
         }
 
+        _invalidateResolutionProposal(agreementId);
+        uint256 nonce = ++_resolutionNonces[agreementId];
+        bytes32 proposalHash = keccak256(
+            abi.encode(
+                address(this), block.chainid, agreementId, nonce, msg.sender, clientRefundAmount, providerReleaseAmount
+            )
+        );
         _resolutionProposals[agreementId] = ResolutionProposal({
             exists: true,
             proposedBy: msg.sender,
             clientRefundAmount: clientRefundAmount,
-            providerReleaseAmount: providerReleaseAmount
+            providerReleaseAmount: providerReleaseAmount,
+            proposalHash: proposalHash
         });
 
-        emit ResolutionProposed(agreementId, msg.sender, clientRefundAmount, providerReleaseAmount);
+        emit ResolutionProposed(agreementId, msg.sender, clientRefundAmount, providerReleaseAmount, proposalHash);
     }
 
     /**
      * @notice Accept the counterparty's pending resolution proposal.
-     * Executes the agreed split and marks the agreement as Cancelled/Resolved.
+     * Executes only the exact reviewed proposal and closes the agreement.
+     * @param expectedProposalHash Identity read from the counterparty's proposal
      */
-    function acceptResolutionProposal(uint256 agreementId) external nonReentrant {
+    function acceptResolutionProposal(uint256 agreementId, bytes32 expectedProposalHash) external nonReentrant {
         Agreement storage agreement = _agreements[agreementId];
         if (agreement.id == 0) revert AgreementDoesNotExist();
         if (msg.sender != agreement.client && msg.sender != agreement.provider) revert NotParty();
@@ -421,9 +481,13 @@ contract PactoraEscrow is ReentrancyGuard {
         ResolutionProposal memory proposal = _resolutionProposals[agreementId];
         if (!proposal.exists) revert NoActiveResolutionProposal();
         if (msg.sender == proposal.proposedBy) revert CannotAcceptOwnProposal();
+        if (proposal.proposalHash != expectedProposalHash) revert ProposalHashMismatch();
 
         uint256 remaining = getRemainingBalance(agreementId);
-        if (proposal.clientRefundAmount + proposal.providerReleaseAmount != remaining) {
+        if (
+            proposal.clientRefundAmount > remaining
+                || proposal.providerReleaseAmount != remaining - proposal.clientRefundAmount
+        ) {
             revert InvalidResolutionAmounts();
         }
 
@@ -431,17 +495,18 @@ contract PactoraEscrow is ReentrancyGuard {
 
         agreement.refundedAmount += proposal.clientRefundAmount;
         agreement.releasedAmount += proposal.providerReleaseAmount;
-        agreement.state = AgreementState.Cancelled;
 
-        emit ResolutionAccepted(agreementId, proposal.clientRefundAmount, proposal.providerReleaseAmount);
-        emit AgreementCancelled(agreementId, msg.sender, proposal.clientRefundAmount);
+        emit ResolutionAccepted(
+            agreementId, proposal.clientRefundAmount, proposal.providerReleaseAmount, proposal.proposalHash
+        );
+        _closeIfSettled(agreement);
 
         // Safe transfers
         if (proposal.providerReleaseAmount > 0) {
-            IERC20(agreement.token).safeTransfer(agreement.provider, proposal.providerReleaseAmount);
+            _transferExact(agreement.token, agreement.provider, proposal.providerReleaseAmount);
         }
         if (proposal.clientRefundAmount > 0) {
-            IERC20(agreement.token).safeTransfer(agreement.client, proposal.clientRefundAmount);
+            _transferExact(agreement.token, agreement.client, proposal.clientRefundAmount);
         }
     }
 
@@ -453,8 +518,62 @@ contract PactoraEscrow is ReentrancyGuard {
         if (!proposal.exists) revert NoActiveResolutionProposal();
         if (msg.sender != proposal.proposedBy) revert NotParty();
 
-        delete _resolutionProposals[agreementId];
-        emit ResolutionCancelled(agreementId, msg.sender);
+        _invalidateResolutionProposal(agreementId);
+    }
+
+    function _submissionDeadline(Milestone storage milestone) private view returns (uint256 deadline) {
+        deadline = milestone.deliveryDeadline;
+        if (milestone.state == MilestoneState.Rejected) {
+            uint256 graceDeadline = uint256(milestone.rejectedAt) + REVIEW_WINDOW;
+            if (graceDeadline > deadline) deadline = graceDeadline;
+        }
+    }
+
+    function _releaseMilestone(Agreement storage agreement, Milestone storage milestone, uint256 milestoneIndex)
+        private
+    {
+        milestone.state = MilestoneState.Approved;
+        agreement.releasedAmount += milestone.amount;
+        _invalidateResolutionProposal(agreement.id);
+        emit MilestoneApproved(agreement.id, milestoneIndex, milestone.amount);
+        _closeIfSettled(agreement);
+        _transferExact(agreement.token, agreement.provider, milestone.amount);
+    }
+
+    function _closeIfSettled(Agreement storage agreement) private {
+        uint256 settled = agreement.releasedAmount + agreement.refundedAmount;
+        require(settled <= agreement.totalAmount, "Invariant: exceeded total");
+        if (settled == agreement.totalAmount) {
+            agreement.completedAt = uint64(block.timestamp);
+            if (agreement.refundedAmount == 0) {
+                agreement.state = AgreementState.Completed;
+                emit AgreementCompleted(agreement.id);
+            } else {
+                agreement.state = AgreementState.Cancelled;
+                emit AgreementCancelled(agreement.id, msg.sender, agreement.refundedAmount);
+            }
+        }
+    }
+
+    function _invalidateResolutionProposal(uint256 agreementId) private {
+        ResolutionProposal memory proposal = _resolutionProposals[agreementId];
+        if (proposal.exists) {
+            delete _resolutionProposals[agreementId];
+            emit ResolutionCancelled(agreementId, msg.sender, proposal.proposalHash);
+        }
+    }
+
+    function _transferExact(address tokenAddress, address recipient, uint256 amount) private {
+        IERC20 token = IERC20(tokenAddress);
+        uint256 escrowBefore = token.balanceOf(address(this));
+        uint256 recipientBefore = token.balanceOf(recipient);
+        token.safeTransfer(recipient, amount);
+        uint256 escrowAfter = token.balanceOf(address(this));
+        uint256 recipientAfter = token.balanceOf(recipient);
+        if (
+            escrowAfter > escrowBefore || escrowBefore - escrowAfter != amount || recipientAfter < recipientBefore
+                || recipientAfter - recipientBefore != amount
+        ) revert InexactTokenTransfer();
     }
 
     // --- View Functions ---
@@ -510,4 +629,3 @@ contract PactoraEscrow is ReentrancyGuard {
         return nextAgreementId - 1;
     }
 }
-

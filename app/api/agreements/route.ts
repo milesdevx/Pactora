@@ -1,130 +1,51 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CreateAgreementSchema } from "@/lib/validation/schemas";
+import { AgreementListQuerySchema, CreateAgreementSchema } from "@/lib/validation/schemas";
 import { db } from "@/lib/db";
-import { agreementMetadata, users, telegramLinks } from "@/lib/db/schema";
-import { eq, or, desc } from "drizzle-orm";
-import { sendTelegramMessage, TelegramNotifications } from "@/lib/telegram/bot";
+import { agreementMetadata } from "@/lib/db/schema";
+import { sql } from "drizzle-orm";
+import { parseUnits } from "viem";
+import { apiError, ApiError, readJson, requireSameOrigin } from "@/lib/security/api";
+import { requireSession } from "@/lib/security/session";
+import { enforceRateLimit } from "@/lib/security/rate-limit";
+import { getEscrowAddress, readChainAgreement, readConfirmedReceipt } from "@/lib/chain/server";
+import { hashAgreementTerms } from "@/lib/chain/terms";
+import { listVerifiedAgreements } from "@/lib/chain/metadata";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const wallet = searchParams.get("wallet")?.toLowerCase();
-
-    let query = db.select().from(agreementMetadata).orderBy(desc(agreementMetadata.createdAt));
-
-    let results;
-    if (wallet) {
-      results = await query.where(
-        or(
-          eq(agreementMetadata.clientAddress, wallet),
-          eq(agreementMetadata.providerAddress, wallet)
-        )
-      );
-    } else {
-      results = await query.limit(50);
-    }
-
-    return NextResponse.json({ agreements: results });
-  } catch (err: any) {
-    console.warn("Database unavailable or connection refused:", err?.code || err?.message);
-    return NextResponse.json(
-      {
-        agreements: [],
-        warning: "Database offline or connection refused. Configure a valid DATABASE_URL in .env.local to persist agreements.",
-      },
-      { status: 200 }
-    );
+    const { wallet } = AgreementListQuerySchema.parse(Object.fromEntries(req.nextUrl.searchParams));
+    const session = await requireSession(req);
+    if (wallet && wallet !== session.walletAddress) throw new ApiError(403, "Wallet does not match the signed session", "WALLET_MISMATCH");
+    return NextResponse.json({ agreements: await listVerifiedAgreements(session.walletAddress) }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    return apiError(error);
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const result = CreateAgreementSchema.safeParse(body);
-
-    if (!result.success) {
-      return NextResponse.json(
-        { error: "Validation failed", details: result.error.flatten().fieldErrors },
-        { status: 400 }
-      );
+    requireSameOrigin(req);
+    const session = await requireSession(req);
+    const data = await readJson(req, CreateAgreementSchema);
+    if (session.walletAddress !== data.clientAddress) throw new ApiError(403, "Only the verified client may register terms", "NOT_AGREEMENT_CLIENT");
+    await enforceRateLimit(req, "agreements:create", 10, 60, session.walletAddress);
+    const [{ agreement, milestones }, confirmed] = await Promise.all([readChainAgreement(data.onChainId), readConfirmedReceipt(data.creationTxHash)]);
+    const creation = confirmed.logs.filter((log) => log.eventName === "AgreementCreated").find((log) => log.args.agreementId === BigInt(data.onChainId));
+    if (!creation || agreement.client.toLowerCase() !== session.walletAddress || creation.args.client.toLowerCase() !== session.walletAddress) throw new ApiError(403, "Receipt does not prove this wallet created the agreement", "INVALID_AGREEMENT_OWNER");
+    if (agreement.provider.toLowerCase() !== data.providerAddress || agreement.token.toLowerCase() !== data.tokenAddress) throw new ApiError(400, "Agreement parties or token differ from the chain", "TERMS_MISMATCH");
+    if (agreement.termsHash.toLowerCase() !== data.termsHash || hashAgreementTerms(data) !== data.termsHash) throw new ApiError(400, "Terms content does not match the on-chain hash", "TERMS_MISMATCH");
+    const amounts = data.milestoneDetails.map((milestone) => parseUnits(milestone.amount, 18));
+    if (parseUnits(data.totalAmount, 18) !== agreement.totalAmount || amounts.reduce((sum, amount) => sum + amount, 0n) !== agreement.totalAmount || amounts.length !== milestones.length || amounts.some((amount, index) => amount !== milestones[index].amount)) {
+      throw new ApiError(400, "Milestone amounts differ from the chain", "AMOUNT_MISMATCH");
     }
-
-    const data = result.data;
-    let insertedRecord: any = data;
-
-    // Insert metadata if database is available
-    try {
-      const inserted = await db
-        .insert(agreementMetadata)
-        .values({
-          onChainId: data.onChainId,
-          title: data.title,
-          description: data.description,
-          termsHash: data.termsHash,
-          clientAddress: data.clientAddress.toLowerCase(),
-          providerAddress: data.providerAddress.toLowerCase(),
-          tokenAddress: data.tokenAddress.toLowerCase(),
-          totalAmount: data.totalAmount,
-          milestoneDetails: data.milestoneDetails,
-        })
-        .onConflictDoUpdate({
-          target: agreementMetadata.onChainId,
-          set: {
-            title: data.title,
-            description: data.description,
-            totalAmount: data.totalAmount,
-            milestoneDetails: data.milestoneDetails,
-            updatedAt: new Date(),
-          },
-        })
-        .returning();
-
-      if (inserted && inserted[0]) {
-        insertedRecord = inserted[0];
-      }
-    } catch (dbErr: any) {
-      console.warn("Database offline. Skipping SQL insert:", dbErr?.code || dbErr?.message);
-    }
-
-    // Check if provider has linked Telegram and notify them
-    try {
-      const providerUser = (
-        await db
-          .select()
-          .from(users)
-          .where(eq(users.walletAddress, data.providerAddress.toLowerCase()))
-          .limit(1)
-      )[0];
-
-      if (providerUser) {
-        const link = (
-          await db
-            .select()
-            .from(telegramLinks)
-            .where(eq(telegramLinks.userId, providerUser.id))
-            .limit(1)
-        )[0];
-
-        if (link && link.notificationsEnabled) {
-          const notificationText = TelegramNotifications.agreementCreated(
-            data.onChainId,
-            data.title,
-            data.totalAmount,
-            `${data.clientAddress.slice(0, 6)}...${data.clientAddress.slice(-4)}`
-          );
-          await sendTelegramMessage(link.telegramChatId, notificationText);
-        }
-      }
-    } catch (notifErr) {
-      console.warn("Could not dispatch Telegram invite notification:", notifErr);
-    }
-
-    return NextResponse.json({ success: true, agreement: insertedRecord });
-  } catch (err) {
-    console.error("Error creating agreement metadata:", err);
-    return NextResponse.json({ error: "Failed to store agreement metadata" }, { status: 500 });
+    if (data.milestoneDetails.some((milestone, index) => BigInt(milestone.deliveryDeadline) !== milestones[index].deliveryDeadline)) throw new ApiError(400, "Delivery deadlines differ from the chain", "DEADLINE_MISMATCH");
+    const [inserted] = await db.insert(agreementMetadata).values({ ...data, escrowAddress: getEscrowAddress(), chainVerified: true })
+      .onConflictDoNothing({ target: [agreementMetadata.escrowAddress, agreementMetadata.onChainId], where: sql`${agreementMetadata.chainVerified} = true` }).returning();
+    if (!inserted) throw new ApiError(409, "Verified agreement terms are already registered and immutable", "TERMS_ALREADY_REGISTERED");
+    return NextResponse.json({ success: true, agreement: inserted }, { status: 201, headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    return apiError(error);
   }
 }
-

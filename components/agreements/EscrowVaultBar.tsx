@@ -1,13 +1,14 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { formatUnits } from "viem";
+import { percentageOf } from "@/lib/chain/amounts";
 
 export interface EscrowVaultBarProps {
-  totalAmount: bigint | number;
-  releasedAmount: bigint | number;
-  refundedAmount: bigint | number;
+  totalAmount: bigint;
+  releasedAmount: bigint;
+  refundedAmount: bigint;
   className?: string;
 }
 
@@ -19,43 +20,14 @@ export function EscrowVaultBar({
 }: EscrowVaultBarProps) {
   const reduce = useReducedMotion();
 
-  const { total, released, refunded, remaining, releasedPct, refundedPct, remainingPct } =
-    useMemo(() => {
-      const toNum = (val: bigint | number): number => {
-        if (typeof val === "bigint") {
-          return parseFloat(formatUnits(val, 18)) || 0;
-        }
-        return val || 0;
-      };
-
-      const tot = toNum(totalAmount);
-      const rel = toNum(releasedAmount);
-      const ref = toNum(refundedAmount);
-      const rem = Math.max(0, tot - rel - ref);
-
-      const relP = tot > 0 ? Math.min(100, (rel / tot) * 100) : 0;
-      const refP = tot > 0 ? Math.min(100 - relP, (ref / tot) * 100) : 0;
-      const remP = tot > 0 ? Math.max(0, 100 - relP - refP) : 0;
-
-      return {
-        total: tot,
-        released: rel,
-        refunded: ref,
-        remaining: rem,
-        releasedPct: relP,
-        refundedPct: refP,
-        remainingPct: remP,
-      };
-    }, [totalAmount, releasedAmount, refundedAmount]);
-
-  const fmt = useMemo(
-    () =>
-      new Intl.NumberFormat("en-US", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }),
-    []
-  );
+  const total = totalAmount;
+  const released = releasedAmount;
+  const refunded = refundedAmount;
+  const remaining = total - released - refunded;
+  const releasedPct = percentageOf(released, total);
+  const refundedPct = percentageOf(refunded, total);
+  const remainingPct = percentageOf(remaining, total);
+  const fmt = { format: (amount: bigint) => formatUnits(amount, 18) };
 
   return (
     <div className={`space-y-3 ${className}`}>
@@ -139,4 +111,3 @@ export function EscrowVaultBar({
     </div>
   );
 }
-

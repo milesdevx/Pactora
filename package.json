@@ -11,11 +11,13 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push",
-    "contracts:test": "cd contracts && forge test",
-    "contracts:build": "cd contracts && forge build"
+    "check:client-secrets": "node --env-file-if-exists=.env.local scripts/check-client-secrets.mjs",
+    "db:generate": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs generate",
+    "db:migrate": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs migrate",
+    "db:push": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs push",
+    "contracts:test": "node scripts/run-foundry.mjs test",
+    "contracts:build": "node scripts/run-foundry.mjs build",
+    "contracts:abi": "node scripts/export-escrow-abi.mjs"
   },
   "engines": {
     "node": "22.x"
@@ -40,6 +42,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-hook-form": "^7.54.2",
+    "server-only": "^0.0.1",
     "tailwind-merge": "^3.0.1",
     "tailwindcss-animate": "^1.0.7",
     "viem": "^2.23.5",

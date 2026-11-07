@@ -362,7 +362,7 @@ export default function LandingPage() {
                 Who holds custody of the escrowed funds?
               </h3>
               <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                Neither Pactora nor any central server holds your funds. MUSD is locked strictly inside the audited Solidity escrow contract deployed on Mezo Testnet. Funds can only be released through client approval or mutual-consent dispute resolution.
+                Neither Pactora nor a central server holds your funds. MUSD funding and payouts are handled by an unaudited escrow contract on Mezo Testnet. V2 adds agreed delivery deadlines, a seven-day review window, and mutual-consent settlement. Deployment verification is required before using new money-moving actions.
               </p>
             </CardContent>
           </Card>

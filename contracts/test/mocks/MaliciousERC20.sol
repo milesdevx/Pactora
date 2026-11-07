@@ -15,6 +15,8 @@ contract MaliciousERC20 is IERC20 {
     PactoraEscrow public escrow;
     uint256 public targetAgreementId;
     bool public attackOnTransfer;
+    bool public attackOnTransferFrom;
+    bytes public attackData;
 
     constructor() {
         balanceOf[msg.sender] = 1_000_000 * 10 ** 18;
@@ -24,6 +26,15 @@ contract MaliciousERC20 is IERC20 {
         escrow = _escrow;
         targetAgreementId = _agreementId;
         attackOnTransfer = true;
+        attackOnTransferFrom = false;
+        attackData = abi.encodeCall(PactoraEscrow.approveMilestone, (_agreementId, 0));
+    }
+
+    function setAttack(PactoraEscrow target, bytes calldata data, bool onTransferFrom) external {
+        escrow = target;
+        attackData = data;
+        attackOnTransfer = !onTransferFrom;
+        attackOnTransferFrom = onTransferFrom;
     }
 
     function totalSupply() external pure override returns (uint256) {
@@ -36,8 +47,7 @@ contract MaliciousERC20 is IERC20 {
 
         if (attackOnTransfer && address(escrow) != address(0)) {
             attackOnTransfer = false;
-            // Attempt reentrant call to approveMilestone
-            escrow.approveMilestone(targetAgreementId, 0);
+            _attack();
         }
         return true;
     }
@@ -51,7 +61,19 @@ contract MaliciousERC20 is IERC20 {
         allowance[from][msg.sender] -= amount;
         balanceOf[from] -= amount;
         balanceOf[to] += amount;
+        if (attackOnTransferFrom && address(escrow) != address(0)) {
+            attackOnTransferFrom = false;
+            _attack();
+        }
         return true;
     }
-}
 
+    function _attack() private {
+        (bool success, bytes memory reason) = address(escrow).call(attackData);
+        if (!success) {
+            assembly ("memory-safe") {
+                revert(add(reason, 0x20), mload(reason))
+            }
+        }
+    }
+}

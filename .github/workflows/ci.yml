@@ -29,6 +29,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
+      - run: pnpm check:client-secrets
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
       - uses: foundry-rs/foundry-toolchain@v1

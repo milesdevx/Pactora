@@ -153,7 +153,7 @@ Execute the comprehensive test suite covering agreement creation, double-funding
 cd contracts
 forge test -vv
 ```
-Phase A run on **2026-11-07** from a clean temporary clone: **19 passed, 0 failed, 0 skipped**, including 256 fuzz runs. This is not an independent security audit.
+Phase B run on **2026-11-07**: **71 passed, 0 failed, 0 skipped**, including 3 fuzz tests with 256 runs each. A Phase A clean-clone build/test also passed. This is not an independent security audit.
 - `test_CreateAgreement_Success`
 - `test_CreateAgreement_Revert_ZeroAddress`
 - `test_CreateAgreement_Revert_ZeroMilestoneAmount`
@@ -179,7 +179,7 @@ Run the TypeScript unit tests:
 ```powershell
 pnpm.cmd test
 ```
-Phase A run on **2026-11-07**: **11 passed, 0 failed**. Later phases must rerun the suites after changes.
+Phase B run on **2026-11-07**: **118 passed, 0 failed**; Playwright desktop/mobile smoke: **2 passed**. Unit fixtures are Illustration, not live transaction evidence.
 - Validation schemas (Zod)
 - Cryptographic nonce & token hashing
 - UI component rendering and interaction
@@ -240,7 +240,7 @@ OpenZeppelin and forge-std sources are committed under `contracts/lib/`; a fresh
 - **Webhook Authentication:** Secret-token header verification, not HMAC. Constant-time verification is a required release gate.
 - **SIWE-Style Signed Nonce:** Custom wallet authentication message, **not EIP-4361/SIWE compliant**. Replay protection and session authorization are required release gates.
 
-This is testnet-only, unaudited software. Current source audit and live verification must finish before any submission claims of readiness.
+This is testnet-only, unaudited software. V2 security fixes, seven-day review claims and agreed-deadline refunds are implemented locally; they require an owner-run redeploy and live verification before submission readiness can be claimed. V1 remains read-only and is not retroactively fixed.
 
 For full threat models and analysis, see [docs/security.md](docs/security.md).
 

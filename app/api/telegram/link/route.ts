@@ -1,67 +1,62 @@
 import { NextRequest, NextResponse } from "next/server";
 import { TelegramLinkRequestSchema } from "@/lib/validation/schemas";
-import { generateRandomToken, hashToken } from "@/lib/security/crypto";
+import { generateLinkToken, hashToken } from "@/lib/security/crypto";
 import { getTelegramBotLinkUrl } from "@/lib/telegram/bot";
 import { db } from "@/lib/db";
-import { users, telegramLinkTokens } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { telegramLinkTokens, telegramLinks } from "@/lib/db/schema";
+import { and, eq } from "drizzle-orm";
+import { ApiError, apiError, readJson, requireSameOrigin } from "@/lib/security/api";
+import { requireSession } from "@/lib/security/session";
+import { enforceRateLimit } from "@/lib/security/rate-limit";
+import { EmptyInputSchema } from "@/lib/validation/schemas";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const result = TelegramLinkRequestSchema.safeParse(body);
-
-    if (!result.success) {
-      return NextResponse.json(
-        { error: "Validation failed", details: result.error.flatten().fieldErrors },
-        { status: 400 }
-      );
-    }
-
-    const { walletAddress } = result.data;
-    const normalizedAddress = walletAddress.toLowerCase();
-
-    // Generate single-use expiring token
-    const rawToken = generateRandomToken(32);
+    requireSameOrigin(req);
+    const session = await requireSession(req);
+    const { walletAddress } = await readJson(req, TelegramLinkRequestSchema);
+    if (walletAddress !== session.walletAddress) throw new ApiError(403, "Wallet does not match the signed session", "WALLET_MISMATCH");
+    await enforceRateLimit(req, "telegram:link", 5, 60, session.walletAddress);
+    const rawToken = generateLinkToken();
     const tokenHash = hashToken(rawToken);
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
 
-    // Find or create user and store token in database if available
-    try {
-      let userRecord = (
-        await db.select().from(users).where(eq(users.walletAddress, normalizedAddress)).limit(1)
-      )[0];
-
-      if (!userRecord) {
-        const inserted = await db
-          .insert(users)
-          .values({ walletAddress: normalizedAddress })
-          .returning();
-        userRecord = inserted[0];
-      }
-
-      await db.insert(telegramLinkTokens).values({
-        tokenHash,
-        userId: userRecord.id,
-        expiresAt,
-      });
-    } catch (dbErr: any) {
-      console.warn("Database offline. Linking token generated in memory:", dbErr?.code || dbErr?.message);
-    }
-
     const botUrl = getTelegramBotLinkUrl(rawToken);
+    await db.insert(telegramLinkTokens).values({ tokenHash, userId: session.userId, expiresAt, issuedWithSession: true });
 
     return NextResponse.json({
       success: true,
       token: rawToken,
       botUrl,
       expiresAt: expiresAt.toISOString(),
-    });
-  } catch (err) {
-    console.error("Telegram link generation error:", err);
-    return NextResponse.json({ error: "Failed to generate link token" }, { status: 500 });
+    }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    return apiError(error);
   }
 }
 
+export async function GET(req: NextRequest) {
+  try {
+    EmptyInputSchema.parse(Object.fromEntries(req.nextUrl.searchParams));
+    const session = await requireSession(req);
+    const [link] = await db.select({ telegramUsername: telegramLinks.telegramUsername, notificationsEnabled: telegramLinks.notificationsEnabled, linkedAt: telegramLinks.linkedAt })
+      .from(telegramLinks).where(and(eq(telegramLinks.userId, session.userId), eq(telegramLinks.walletVerified, true))).limit(1);
+    return NextResponse.json({ linked: Boolean(link), link: link || null, testNotificationsEnabled: process.env.NODE_ENV !== "production" || process.env.ALLOW_TEST_NOTIFICATIONS === "true" }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) { return apiError(error); }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    requireSameOrigin(req);
+    await readJson(req, EmptyInputSchema);
+    const session = await requireSession(req);
+    await enforceRateLimit(req, "telegram:unlink", 5, 60, session.walletAddress);
+    await db.transaction(async (tx) => {
+      await tx.delete(telegramLinks).where(eq(telegramLinks.userId, session.userId));
+      await tx.delete(telegramLinkTokens).where(eq(telegramLinkTokens.userId, session.userId));
+    });
+    return NextResponse.json({ success: true });
+  } catch (error) { return apiError(error); }
+}

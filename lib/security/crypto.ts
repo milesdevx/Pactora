@@ -7,6 +7,10 @@ export function generateRandomToken(byteLength = 32): string {
   return crypto.randomBytes(byteLength).toString("hex");
 }
 
+export function generateLinkToken(): string {
+  return crypto.randomBytes(32).toString("base64url");
+}
+
 /**
  * Hash a sensitive token (such as a link token) using SHA-256 before database storage
  */
@@ -17,14 +21,14 @@ export function hashToken(token: string): string {
 /**
  * Generate standard authentication message for wallet signing
  */
-export function createAuthMessage(address: string, nonce: string, issuedAt: string): string {
+export function createAuthMessage(address: string, nonce: string, issuedAt: string, origin?: string, expiresAt?: string): string {
   return [
     "Pactora Authentication",
     "Sign this message to authenticate your wallet with Pactora.",
     `Wallet: ${address.toLowerCase()}`,
     `Nonce: ${nonce}`,
     `Issued At: ${issuedAt}`,
+    ...(origin ? [`Origin: ${origin}`, "Chain ID: 31611", `Expires At: ${expiresAt}`] : []),
     "Terms: This request will not trigger any blockchain transaction or gas fee.",
   ].join("\n");
 }
-

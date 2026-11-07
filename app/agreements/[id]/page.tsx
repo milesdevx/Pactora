@@ -3,8 +3,9 @@
 import React, { useState, useEffect, use } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
-import { formatUnits, parseUnits, keccak256, stringToBytes } from "viem";
+import { useAccount, useBlock, useReadContract, useWriteContract } from "wagmi";
+import { formatUnits, keccak256, stringToBytes } from "viem";
+import { useQuery } from "@tanstack/react-query";
 import { CONTRACT_ADDRESSES, mezoTestnet } from "@/lib/chain/config";
 import { PACTORA_ESCROW_ABI } from "@/lib/chain/abi/PactoraEscrow";
 import { ERC20_ABI } from "@/lib/chain/abi/IERC20";
@@ -16,6 +17,12 @@ import { StatusDot } from "@/components/agreements/StatusDot";
 import { TxStatus } from "@/components/tx/TxStatus";
 import { AddressChip } from "@/components/ui/AddressChip";
 import { EscrowVaultBar } from "@/components/agreements/EscrowVaultBar";
+import { AgreementIdSchema } from "@/lib/validation/schemas";
+import { formatChainTime, parseMusdAmount, percentageOf } from "@/lib/chain/amounts";
+import { useConfirmedTransaction } from "@/lib/hooks/useConfirmedTransaction";
+import { useMoneyConfirmation } from "@/components/tx/MoneyConfirmation";
+import { TestnetGuard } from "@/components/wallet/TestnetGuard";
+import { WalletSessionControls, useWalletSession, jsonRequest } from "@/components/wallet/WalletSessionProvider";
 import {
   ShieldCheck,
   CheckCircle2,
@@ -42,13 +49,15 @@ interface AgreementWorkspaceProps {
 
 export default function AgreementWorkspacePage({ params }: AgreementWorkspaceProps) {
   const resolvedParams = use(params);
-  const agreementId = BigInt(resolvedParams.id);
+  const parsedId = AgreementIdSchema.safeParse(resolvedParams.id);
+  const agreementId = parsedId.success ? BigInt(parsedId.data) : 0n;
   const { address, isConnected } = useAccount();
   const shouldReduceMotion = useReducedMotion();
 
   // Read on-chain agreement state
   const {
     data: contractAgreement,
+    error: contractReadError,
     isLoading: isContractLoading,
     refetch: refetchAgreement,
   } = useReadContract({
@@ -56,6 +65,8 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
     abi: PACTORA_ESCROW_ABI,
     functionName: "getAgreement",
     args: [agreementId],
+    chainId: 31611,
+    query: { enabled: parsedId.success },
   });
 
   // Read on-chain milestones
@@ -68,6 +79,8 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
     abi: PACTORA_ESCROW_ABI,
     functionName: "getMilestones",
     args: [agreementId],
+    chainId: 31611,
+    query: { enabled: parsedId.success },
   });
 
   // Read resolution proposal if any
@@ -79,6 +92,8 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
     abi: PACTORA_ESCROW_ABI,
     functionName: "getResolutionProposal",
     args: [agreementId],
+    chainId: 31611,
+    query: { enabled: parsedId.success },
   });
 
   // Read MUSD allowance for client
@@ -87,10 +102,19 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
     abi: ERC20_ABI,
     functionName: "allowance",
     args: address && CONTRACT_ADDRESSES.PACTORA_ESCROW ? [address, CONTRACT_ADDRESSES.PACTORA_ESCROW] : undefined,
+    chainId: 31611,
+    query: { enabled: Boolean(address && parsedId.success) },
   });
+  const { data: contractVersion } = useReadContract({ address: CONTRACT_ADDRESSES.PACTORA_ESCROW, abi: PACTORA_ESCROW_ABI, functionName: "VERSION", chainId: 31611 });
+  const { data: block } = useBlock({ chainId: 31611, query: { refetchInterval: 15_000 } });
+  const now = block?.timestamp || 0n;
+  const reviewWindow = 7n * 24n * 60n * 60n;
 
   // Off-chain metadata state
-  const [metadata, setMetadata] = useState<any>(null);
+  const session = useWalletSession();
+  const metadataQuery = useQuery({ queryKey: ["agreement-metadata", resolvedParams.id, address], enabled: parsedId.success && session.authenticated, retry: false, queryFn: () => jsonRequest<{ agreement: { title: string; description?: string; milestoneDetails: { title: string; description?: string }[] } }>(`/api/agreements/${resolvedParams.id}`) });
+  const metadata = metadataQuery.data?.agreement;
+  const evidenceQuery = useQuery({ queryKey: ["agreement-evidence", resolvedParams.id, address], enabled: parsedId.success && session.authenticated, retry: false, queryFn: () => jsonRequest<{ evidence: { milestoneIndex: number; kind: string; text: string; contentHash: string; txHash: string }[] }>(`/api/agreements/${resolvedParams.id}/evidence`) });
   const [submissionNotes, setSubmissionNotes] = useState<{ [key: number]: string }>({});
   const [rejectionReasons, setRejectionReasons] = useState<{ [key: number]: string }>({});
   const [showRejectForm, setShowRejectForm] = useState<number | null>(null);
@@ -101,23 +125,12 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
   const [showDisputeModal, setShowDisputeModal] = useState(false);
 
   // Wagmi write hooks
-  const { data: txHash, writeContractAsync, isPending: isTxPending, error: writeError } = useWriteContract();
-  const {
-    isLoading: isWaitingForReceipt,
-    isSuccess: isReceiptSuccess,
-    error: receiptError,
-    data: receiptData,
-  } = useWaitForTransactionReceipt({ hash: txHash });
-
-  // Fetch off-chain metadata
-  useEffect(() => {
-    fetch(`/api/agreements/${resolvedParams.id}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.agreement) setMetadata(data.agreement);
-      })
-      .catch((err) => console.warn("Off-chain metadata fetch error:", err));
-  }, [resolvedParams.id]);
+  const { writeContractAsync } = useWriteContract();
+  const transaction = useConfirmedTransaction();
+  const money = useMoneyConfirmation();
+  const { hash: txHash, isPending: isTxPending, isWaitingForReceipt, isSuccess: isReceiptSuccess, error: writeError, receipt: receiptData } = transaction;
+  const receiptError = null;
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
 
   // Refresh on transaction success
   useEffect(() => {
@@ -130,157 +143,203 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
   }, [isReceiptSuccess, refetchAgreement, refetchMilestones, refetchProposal, refetchAllowance]);
 
   const agreementStateMap = ["Created", "Accepted", "Funded", "Completed", "Cancelled"];
-  const milestoneStateMap = ["Pending", "Submitted", "Approved", "Rejected"];
+  const milestoneStateMap = ["Pending", "Submitted", "Approved", "Rejected", "Refunded"];
 
-  const agreementStateIndex = contractAgreement ? Number(contractAgreement.state) : 0;
+  const agreementStateIndex = contractAgreement ? Number(contractAgreement.state) : -1;
   const agreementState = agreementStateMap[agreementStateIndex] || "Unknown";
 
   const clientAddress = contractAgreement?.client?.toLowerCase();
   const providerAddress = contractAgreement?.provider?.toLowerCase();
   const currentAddress = address?.toLowerCase();
 
-  const isClient = currentAddress === clientAddress;
-  const isProvider = currentAddress === providerAddress;
+  const isClient = Boolean(currentAddress && currentAddress === clientAddress);
+  const isProvider = Boolean(currentAddress && currentAddress === providerAddress);
 
-  const totalAmountNum = contractAgreement
-    ? parseFloat(formatUnits(contractAgreement.totalAmount, 18))
-    : parseFloat(metadata?.totalAmount || "0");
+  const remainingWei = contractAgreement ? contractAgreement.totalAmount - contractAgreement.releasedAmount - contractAgreement.refundedAmount : 0n;
+  const totalAmountFormatted = contractAgreement ? formatUnits(contractAgreement.totalAmount, 18) : "Unavailable";
+  const releasedAmountFormatted = contractAgreement ? formatUnits(contractAgreement.releasedAmount, 18) : "Unavailable";
+  const remainingBalanceFormatted = contractAgreement ? formatUnits(remainingWei, 18) : "Unavailable";
+  const percentReleased = contractAgreement ? percentageOf(contractAgreement.releasedAmount, contractAgreement.totalAmount) : 0;
 
-  const releasedAmountNum = contractAgreement
-    ? parseFloat(formatUnits(contractAgreement.releasedAmount, 18))
-    : 0;
-
-  const remainingBalanceNum = contractAgreement
-    ? parseFloat(
-        formatUnits(
-          contractAgreement.totalAmount -
-            contractAgreement.releasedAmount -
-            contractAgreement.refundedAmount,
-          18
-        )
-      )
-    : 0;
-
-  const totalAmountFormatted = totalAmountNum.toFixed(2);
-  const releasedAmountFormatted = releasedAmountNum.toFixed(2);
-  const remainingBalanceFormatted = remainingBalanceNum.toFixed(2);
-
-  const percentReleased =
-    totalAmountNum > 0 ? Math.min(100, Math.round((releasedAmountNum / totalAmountNum) * 100)) : 0;
+  async function confirmTransfer(title: string, explanation: string, amount: bigint, recipient: string) {
+    return money.confirm({ title, explanation, transfers: [{ label: "Exact amount", amount: formatUnits(amount, 18), recipient, token: contractAgreement!.token }] });
+  }
 
   // --- Contract Action Handlers ---
 
   const handleAcceptAgreement = async () => {
-    await writeContractAsync({
+    await transaction.execute(() => writeContractAsync({
       address: CONTRACT_ADDRESSES.PACTORA_ESCROW,
       abi: PACTORA_ESCROW_ABI,
       functionName: "acceptAgreement",
       args: [agreementId],
-    });
+      chainId: 31611,
+      account: address,
+    }));
   };
 
   const handleApproveMUSD = async () => {
     if (!contractAgreement) return;
-    await writeContractAsync({
+    if (!await confirmTransfer("Approve MUSD allowance", "This grants the escrow a limited allowance. It does not deposit funds yet.", contractAgreement.totalAmount, CONTRACT_ADDRESSES.PACTORA_ESCROW)) return;
+    await transaction.execute(() => writeContractAsync({
       address: CONTRACT_ADDRESSES.MUSD,
       abi: ERC20_ABI,
       functionName: "approve",
       args: [CONTRACT_ADDRESSES.PACTORA_ESCROW, contractAgreement.totalAmount],
-    });
+      chainId: 31611,
+      account: address,
+    }), false);
+    void refetchAllowance();
   };
 
   const handleFundAgreement = async () => {
-    await writeContractAsync({
+    if (!contractAgreement || !await confirmTransfer("Fund agreement", "Deposit the exact agreement total into the testnet escrow.", contractAgreement.totalAmount, CONTRACT_ADDRESSES.PACTORA_ESCROW)) return;
+    await transaction.execute(() => writeContractAsync({
       address: CONTRACT_ADDRESSES.PACTORA_ESCROW,
       abi: PACTORA_ESCROW_ABI,
       functionName: "fundAgreement",
       args: [agreementId],
-    });
+      chainId: 31611,
+      account: address,
+    }));
   };
 
   const handleSubmitMilestone = async (milestoneIdx: number) => {
-    const notes = submissionNotes[milestoneIdx] || `Deliverable for Milestone ${milestoneIdx + 1}`;
+    const notes = submissionNotes[milestoneIdx]?.trim();
+    if (!notes || notes.length > 2000) { transaction.setError(new Error("Enter actual deliverable notes or a URL, at most 2000 characters.")); return; }
     const submissionHash = keccak256(stringToBytes(notes));
 
-    await writeContractAsync({
+    const confirmed = await transaction.execute(() => writeContractAsync({
       address: CONTRACT_ADDRESSES.PACTORA_ESCROW,
       abi: PACTORA_ESCROW_ABI,
       functionName: "submitMilestone",
       args: [agreementId, BigInt(milestoneIdx), submissionHash],
-    });
+      chainId: 31611,
+      account: address,
+    }), false);
+    if (confirmed) await storeEvidence(milestoneIdx, "submission", notes, confirmed.transactionHash);
   };
 
   const handleApproveMilestone = async (milestoneIdx: number) => {
-    await writeContractAsync({
+    const milestone = contractMilestones?.[milestoneIdx];
+    if (!milestone || !contractAgreement || !await confirmTransfer("Approve and release payment", "Transfer this milestone's amount from escrow to the provider.", milestone.amount, contractAgreement.provider)) return;
+    await transaction.execute(() => writeContractAsync({
       address: CONTRACT_ADDRESSES.PACTORA_ESCROW,
       abi: PACTORA_ESCROW_ABI,
       functionName: "approveMilestone",
       args: [agreementId, BigInt(milestoneIdx)],
-    });
+      chainId: 31611,
+      account: address,
+    }));
   };
 
   const handleRejectMilestone = async (milestoneIdx: number) => {
-    const reason = rejectionReasons[milestoneIdx] || "Revision required";
+    const reason = rejectionReasons[milestoneIdx]?.trim();
+    if (!reason || reason.length > 2000) { transaction.setError(new Error("Enter an actual rejection reason, at most 2000 characters.")); return; }
     const reasonHash = keccak256(stringToBytes(reason));
 
-    await writeContractAsync({
+    const confirmed = await transaction.execute(() => writeContractAsync({
       address: CONTRACT_ADDRESSES.PACTORA_ESCROW,
       abi: PACTORA_ESCROW_ABI,
       functionName: "rejectMilestone",
       args: [agreementId, BigInt(milestoneIdx), reasonHash],
-    });
-
-    setShowRejectForm(null);
+      chainId: 31611,
+      account: address,
+    }), false);
+    if (confirmed) { await storeEvidence(milestoneIdx, "rejection", reason, confirmed.transactionHash); setShowRejectForm(null); }
   };
 
   const handleCancelUnfunded = async () => {
-    await writeContractAsync({
+    await transaction.execute(() => writeContractAsync({
       address: CONTRACT_ADDRESSES.PACTORA_ESCROW,
       abi: PACTORA_ESCROW_ABI,
       functionName: "cancelUnfundedAgreement",
       args: [agreementId],
-    });
+      chainId: 31611,
+      account: address,
+    }));
   };
 
   const handleProposeResolution = async () => {
-    const clientRefundWei = parseUnits(resolutionClientRefund || "0", 18);
-    const providerReleaseWei = parseUnits(resolutionProviderRelease || "0", 18);
-
-    await writeContractAsync({
+    let clientRefundWei: bigint;
+    let providerReleaseWei: bigint;
+    try { clientRefundWei = parseMusdAmount(resolutionClientRefund); providerReleaseWei = parseMusdAmount(resolutionProviderRelease); }
+    catch (error) { transaction.setError(error instanceof Error ? error : new Error("Invalid split amounts.")); return; }
+    if (clientRefundWei + providerReleaseWei !== remainingWei) { transaction.setError(new Error("Refund plus release must exactly equal the remaining escrow.")); return; }
+    const confirmed = await transaction.execute(() => writeContractAsync({
       address: CONTRACT_ADDRESSES.PACTORA_ESCROW,
       abi: PACTORA_ESCROW_ABI,
       functionName: "proposeResolution",
       args: [agreementId, clientRefundWei, providerReleaseWei],
-    });
-
-    setShowDisputeModal(false);
+      chainId: 31611,
+      account: address,
+    }));
+    if (confirmed) setShowDisputeModal(false);
   };
 
   const handleAcceptResolution = async () => {
-    await writeContractAsync({
+    if (!resolutionProposal?.exists || !contractAgreement) return;
+    if (!await money.confirm({ title: "Accept mutual-consent split", explanation: "Accept exactly this reviewed proposal. Its unique hash prevents substituted terms.", transfers: [
+      { label: "Refund to client", amount: formatUnits(resolutionProposal.clientRefundAmount, 18), recipient: contractAgreement.client, token: contractAgreement.token },
+      { label: "Release to provider", amount: formatUnits(resolutionProposal.providerReleaseAmount, 18), recipient: contractAgreement.provider, token: contractAgreement.token },
+    ] })) return;
+    await transaction.execute(() => writeContractAsync({
       address: CONTRACT_ADDRESSES.PACTORA_ESCROW,
       abi: PACTORA_ESCROW_ABI,
       functionName: "acceptResolutionProposal",
-      args: [agreementId],
-    });
+      args: [agreementId, resolutionProposal.proposalHash],
+      chainId: 31611,
+      account: address,
+    }));
   };
 
   const handleCancelProposal = async () => {
-    await writeContractAsync({
+    await transaction.execute(() => writeContractAsync({
       address: CONTRACT_ADDRESSES.PACTORA_ESCROW,
       abi: PACTORA_ESCROW_ABI,
       functionName: "cancelResolutionProposal",
       args: [agreementId],
-    });
+      chainId: 31611,
+      account: address,
+    }));
   };
+
+  async function storeEvidence(milestoneIndex: number, kind: "submission" | "rejection", text: string, hash: `0x${string}`) {
+    setEvidenceError(null);
+    try { await jsonRequest(`/api/agreements/${resolvedParams.id}/evidence`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ milestoneIndex, kind, text, txHash: hash }) }); await evidenceQuery.refetch(); }
+    catch { setEvidenceError("Transaction is confirmed, but its notes could not be stored. Keep the actual text and transaction hash; no attached evidence is being claimed."); }
+    await transaction.notifyConfirmed(hash);
+  }
+
+  async function handleClaimTimeout(index: number) {
+    const milestone = contractMilestones?.[index];
+    if (!milestone || !contractAgreement || !await confirmTransfer("Claim after review timeout", "The seven-day review window has elapsed. Release this submitted milestone to its provider.", milestone.amount, contractAgreement.provider)) return;
+    await transaction.execute(() => writeContractAsync({ address: CONTRACT_ADDRESSES.PACTORA_ESCROW, abi: PACTORA_ESCROW_ABI, functionName: "claimAfterTimeout", args: [agreementId, BigInt(index)], chainId: 31611, account: address }));
+  }
+
+  async function handleRefundNoShow(index: number) {
+    const milestone = contractMilestones?.[index];
+    if (!milestone || !contractAgreement || !await confirmTransfer("Refund unsubmitted work", "The agreed delivery or revision deadline has elapsed. Refund only this unsettled milestone to the client.", milestone.amount, contractAgreement.client)) return;
+    await transaction.execute(() => writeContractAsync({ address: CONTRACT_ADDRESSES.PACTORA_ESCROW, abi: PACTORA_ESCROW_ABI, functionName: "refundNoShow", args: [agreementId, BigInt(index)], chainId: 31611, account: address }));
+  }
 
   const needsAllowance =
     contractAgreement &&
     musdAllowance !== undefined &&
     musdAllowance < contractAgreement.totalAmount;
 
+  if (!parsedId.success) return <div className="mx-auto max-w-4xl p-8"><h1 className="text-2xl font-semibold">Invalid agreement ID</h1><p className="mt-3">Use a positive numeric agreement ID.</p></div>;
+  if (isContractLoading) return <div className="mx-auto max-w-4xl p-8"><h1 className="text-2xl font-semibold">Loading agreement</h1><p className="mt-3">Reading confirmed Mezo Testnet state.</p></div>;
+  if (contractReadError || (!isContractLoading && !contractAgreement)) return <div className="mx-auto max-w-4xl p-8"><h1 className="text-2xl font-semibold">Agreement unavailable</h1><p className="mt-3">The agreement was not found or Mezo Testnet could not be read. No amounts or success state are being fabricated.</p><Button className="mt-4" onClick={() => { void refetchAgreement(); }}>Retry chain read</Button></div>;
+  if (contractAgreement && contractAgreement.token.toLowerCase() !== CONTRACT_ADDRESSES.MUSD.toLowerCase()) return <div className="mx-auto max-w-4xl p-8"><h1 className="text-2xl font-semibold">Unsupported escrow token</h1><p className="mt-3 break-all">This agreement uses {contractAgreement.token}. The current interface supports canonical MUSD only and will not label this token as MUSD.</p></div>;
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
+      <TestnetGuard />
+      <WalletSessionControls />
+      {contractVersion !== 2n && <p role="alert" className="text-sm text-amber-200">This deployment is legacy or unavailable. Money-moving actions are disabled; use the public receipt for read-only verification.</p>}
+      {metadataQuery.error && <p role="status" className="text-sm text-amber-200">Verified private terms could not be loaded: {metadataQuery.error.message}</p>}
+      {evidenceError && <p role="alert" className="text-sm text-amber-200">{evidenceError}</p>}
       {/* Breadcrumb & Public Verifier Link */}
       <div className="flex items-center justify-between">
         <Link
@@ -338,7 +397,7 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
                 Total Escrow Value
               </span>
               <p className="text-2xl sm:text-3xl font-bold font-mono text-teal-400">
-                {totalAmountNum.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MUSD
+                {totalAmountFormatted} MUSD
               </p>
               <div className="flex items-center gap-3 mt-1 text-xs text-slate-400 sm:justify-end">
                 <span>
@@ -354,7 +413,7 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
 
           {/* Escrow Vault Bar with Released, Refunded & Remaining breakdown */}
           <EscrowVaultBar
-            totalAmount={contractAgreement?.totalAmount || BigInt(0)}
+            totalAmount={contractAgreement && contractAgreement.fundedAt > 0n ? contractAgreement.totalAmount : 0n}
             releasedAmount={contractAgreement?.releasedAmount || BigInt(0)}
             refundedAmount={contractAgreement?.refundedAmount || BigInt(0)}
           />
@@ -367,9 +426,9 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
                 {isClient && <Badge variant="secondary">You</Badge>}
               </div>
               <div>
-                {clientAddress || metadata?.clientAddress ? (
+                {clientAddress ? (
                   <AddressChip
-                    value={clientAddress || metadata?.clientAddress}
+                    value={clientAddress}
                     className="w-full justify-between"
                   />
                 ) : (
@@ -384,9 +443,9 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
                 {isProvider && <Badge variant="secondary">You</Badge>}
               </div>
               <div>
-                {providerAddress || metadata?.providerAddress ? (
+                {providerAddress ? (
                   <AddressChip
-                    value={providerAddress || metadata?.providerAddress}
+                    value={providerAddress}
                     className="w-full justify-between"
                   />
                 ) : (
@@ -422,6 +481,8 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
         error={writeError || receiptError}
         reverted={receiptData?.status === "reverted"}
       />
+      {transaction.notificationWarning && <p role="status" className="text-sm text-amber-200">{transaction.notificationWarning}</p>}
+      <fieldset disabled={transaction.busy || contractVersion !== 2n} className="space-y-8">
 
       {/* Action Bar for Agreement State Transitions */}
       {/* 1. Created -> Provider needs to accept */}
@@ -443,6 +504,7 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
             {isProvider && (
               <Button
                 onClick={handleAcceptAgreement}
+                disabled={!metadata}
                 isLoading={isTxPending || isWaitingForReceipt}
                 size="sm"
                 className="gap-1.5 shadow-md shadow-teal-500/20"
@@ -594,6 +656,11 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
                 const mState = milestoneStateMap[milestoneStateIndex] || "Pending";
                 const amountFormatted = formatUnits(m.amount, 18);
                 const offChainMilestone = metadata?.milestoneDetails?.[idx];
+                const reviewEnds = m.submittedAt + reviewWindow;
+                const revisionEnds = m.rejectedAt + reviewWindow;
+                const deliveryCutoff = mState === "Rejected" && revisionEnds > m.deliveryDeadline ? revisionEnds : m.deliveryDeadline;
+                const delivered = evidenceQuery.data?.evidence.find((item) => item.milestoneIndex === idx && item.kind === "submission" && item.contentHash === m.submissionHash);
+                const rejected = evidenceQuery.data?.evidence.find((item) => item.milestoneIndex === idx && item.kind === "rejection" && item.contentHash === m.rejectionReasonHash);
 
                 const yourMove =
                   (isClient && mState === "Submitted") ||
@@ -692,6 +759,8 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
                         </div>
                       </div>
 
+                      <p className="mt-3 text-sm text-slate-300">Delivery deadline: {formatChainTime(m.deliveryDeadline)}. {mState === "Submitted" && `Review ends: ${formatChainTime(reviewEnds)}.`} {mState === "Rejected" && `Resubmit before: ${formatChainTime(deliveryCutoff)}.`}</p>
+
                       {/* Deliverable submission proof */}
                       {m.submissionHash !==
                         "0x0000000000000000000000000000000000000000000000000000000000000000" && (
@@ -702,15 +771,16 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
                             label="Proof Hash"
                             showExplorerLink={false}
                           />
-                          <span className="text-teal-400 font-medium">Deliverable Attached</span>
+                          <span className="text-teal-400 font-medium">{delivered ? "Evidence text verified against this hash" : "Hash committed; evidence text unavailable"}</span>
                         </div>
                       )}
+                      {delivered && <div className="mt-3 space-y-2 text-sm text-slate-200"><p className="whitespace-pre-wrap break-words">{delivered.text}</p><a href={`https://explorer.test.mezo.org/tx/${delivered.txHash}`} target="_blank" rel="noreferrer" className="text-teal-300 underline">Submission transaction</a></div>}
 
                       {/* Rejection reason notice */}
                       {mState === "Rejected" && (
                         <div className="mt-3 p-3 rounded-lg border border-rose-500/30 bg-rose-950/20 text-xs text-rose-300">
                           <span className="font-semibold block mb-0.5">Rejection Notice:</span>
-                          Client requested revisions. Please review specs and resubmit deliverable.
+                          {rejected?.text || "A rejection hash is committed on-chain; its text is unavailable."}
                         </div>
                       )}
 
@@ -718,7 +788,7 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
                       {agreementState === "Funded" && (
                         <div className="mt-4 pt-3 border-t border-slate-800 flex flex-wrap items-center justify-end gap-3">
                           {/* Provider Submission Form */}
-                          {isProvider && (mState === "Pending" || mState === "Rejected") && (
+                          {isProvider && (mState === "Pending" || mState === "Rejected") && now < deliveryCutoff && (
                             <div className="w-full space-y-2">
                               <Input
                                 placeholder="Enter deliverable notes, PR link, or IPFS URI..."
@@ -730,11 +800,14 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
                                   })
                                 }
                                 className="text-xs"
+                                maxLength={2000}
+                                aria-label={`Evidence for milestone ${idx + 1}`}
                               />
                               <div className="flex justify-end">
                                 <Button
                                   size="sm"
-                                  onClick={() => handleSubmitMilestone(idx)}
+                                    onClick={() => handleSubmitMilestone(idx)}
+                                    disabled={!submissionNotes[idx]?.trim()}
                                   isLoading={isTxPending || isWaitingForReceipt}
                                   className="gap-1.5 text-xs shadow-md shadow-teal-500/20"
                                 >
@@ -748,7 +821,7 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
                           {/* Client Approval / Rejection Controls */}
                           {isClient && mState === "Submitted" && (
                             <>
-                              {showRejectForm === idx ? (
+                              {showRejectForm === idx && now < reviewEnds ? (
                                 <div className="w-full space-y-2">
                                   <Input
                                     placeholder="State reason for rejection / requested revisions..."
@@ -760,6 +833,8 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
                                       })
                                     }
                                     className="text-xs"
+                                    maxLength={2000}
+                                    aria-label={`Rejection reason for milestone ${idx + 1}`}
                                   />
                                   <div className="flex justify-end gap-2">
                                     <Button
@@ -773,6 +848,7 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
                                       variant="destructive"
                                       size="sm"
                                       onClick={() => handleRejectMilestone(idx)}
+                                      disabled={!rejectionReasons[idx]?.trim() || now >= reviewEnds}
                                       isLoading={isTxPending || isWaitingForReceipt}
                                     >
                                       Confirm Rejection
@@ -785,6 +861,7 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
                                     variant="outline"
                                     size="sm"
                                     onClick={() => setShowRejectForm(idx)}
+                                    disabled={now >= reviewEnds}
                                     className="text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-950/20"
                                   >
                                     Reject with Reason
@@ -802,6 +879,8 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
                               )}
                             </>
                           )}
+                          {isProvider && mState === "Submitted" && now >= reviewEnds && <Button size="sm" onClick={() => { void handleClaimTimeout(idx); }}>Claim after seven-day review window</Button>}
+                          {isClient && (mState === "Pending" || mState === "Rejected") && now >= deliveryCutoff && <Button variant="outline" size="sm" onClick={() => { void handleRefundNoShow(idx); }}>Refund {amountFormatted} MUSD for no-show</Button>}
                         </div>
                       )}
                     </motion.div>
@@ -863,8 +942,8 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
                     Refund to Client (MUSD)
                   </label>
                   <Input
-                    type="number"
-                    step="any"
+                    type="text"
+                    inputMode="decimal"
                     placeholder="0"
                     value={resolutionClientRefund}
                     onChange={(e) => setResolutionClientRefund(e.target.value)}
@@ -877,8 +956,8 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
                     Release to Provider (MUSD)
                   </label>
                   <Input
-                    type="number"
-                    step="any"
+                    type="text"
+                    inputMode="decimal"
                     placeholder="0"
                     value={resolutionProviderRelease}
                     onChange={(e) => setResolutionProviderRelease(e.target.value)}
@@ -908,6 +987,8 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
           </div>
         )}
       </AnimatePresence>
+      </fieldset>
+      {money.dialog}
     </div>
   );
 }

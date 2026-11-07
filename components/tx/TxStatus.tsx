@@ -36,13 +36,14 @@ export function TxStatus({
     return null;
   }
 
-  const isFailed = Boolean(error || reverted);
+  const isFailed = Boolean(reverted || (error && !isWaitingForReceipt && !isPending));
+  const confirmed = Boolean(isSuccess && !isFailed && !isWaitingForReceipt && !isPending);
 
   return (
     <div
       aria-live="polite"
       className={`rounded-xl border p-4 text-xs transition-colors ${
-        isSuccess
+        confirmed
           ? "border-emerald-500/30 bg-emerald-950/20 text-emerald-200"
           : isFailed
           ? "border-rose-500/30 bg-rose-950/20 text-rose-200"
@@ -51,7 +52,7 @@ export function TxStatus({
     >
       <div className="flex items-center gap-3">
         {/* State Icon */}
-        {isSuccess ? (
+        {confirmed ? (
           <motion.div
             initial={reduce ? false : { scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
@@ -73,7 +74,7 @@ export function TxStatus({
         {/* Message and Explorer Link */}
         <div className="flex-1 min-w-0">
           <p className="font-semibold text-sm">
-            {isSuccess
+            {confirmed
               ? "Transaction Confirmed"
               : isFailed
               ? "Transaction Failed"
@@ -83,14 +84,14 @@ export function TxStatus({
           </p>
 
           <p className="text-slate-300 mt-0.5 truncate">
-            {isSuccess ? (
+            {confirmed ? (
               "State updated on Mezo Testnet."
             ) : isFailed ? (
               error?.message || "Transaction was reverted on-chain."
             ) : isPending ? (
               "Please check your connected wallet to sign the transaction."
             ) : (
-              "Block confirmation in progress..."
+              error?.message || "Block confirmation in progress..."
             )}
           </p>
 
@@ -112,4 +113,3 @@ export function TxStatus({
     </div>
   );
 }
-

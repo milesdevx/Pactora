@@ -3,8 +3,8 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { useAccount, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
-import { parseUnits, keccak256, stringToBytes } from "viem";
+import { useAccount, useReadContract, useWriteContract } from "wagmi";
+import { parseEventLogs } from "viem";
 import { CONTRACT_ADDRESSES } from "@/lib/chain/config";
 import { PACTORA_ESCROW_ABI } from "@/lib/chain/abi/PactoraEscrow";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,11 @@ import { Textarea } from "@/components/ui/input";
 import { AnimatedInput } from "@/components/ui/AnimatedInput";
 import { TxStatus } from "@/components/tx/TxStatus";
 import { Badge } from "@/components/ui/badge";
+import { formatMusdAmount, parseMusdAmount } from "@/lib/chain/amounts";
+import { hashAgreementTerms } from "@/lib/chain/terms";
+import { useConfirmedTransaction } from "@/lib/hooks/useConfirmedTransaction";
+import { WalletSessionControls, jsonRequest } from "@/components/wallet/WalletSessionProvider";
+import { TestnetGuard } from "@/components/wallet/TestnetGuard";
 import {
   Plus,
   Trash2,
@@ -29,6 +34,7 @@ interface MilestoneInput {
   title: string;
   amount: string;
   description: string;
+  deliveryDeadline: string;
 }
 
 export default function CreateAgreementPage() {
@@ -43,32 +49,30 @@ export default function CreateAgreementPage() {
   const [description, setDescription] = useState("");
   const [providerAddress, setProviderAddress] = useState("");
   const [milestones, setMilestones] = useState<MilestoneInput[]>([
-    { title: "Milestone 1: Project Setup & Architecture Specs", amount: "500", description: "" },
-    { title: "Milestone 2: Core Implementation & Smart Contracts", amount: "1000", description: "" },
+    { title: "", amount: "", description: "", deliveryDeadline: "" },
   ]);
 
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [registration, setRegistration] = useState<{ id: number; body: Record<string, unknown> } | null>(null);
 
-  const { data: txHash, writeContractAsync, isPending: isTxPending, error: writeError } = useWriteContract();
-  const {
-    isLoading: isWaitingForReceipt,
-    isSuccess: isReceiptSuccess,
-    error: receiptError,
-    data: receiptData,
-  } = useWaitForTransactionReceipt({ hash: txHash });
+  const { writeContractAsync } = useWriteContract();
+  const transaction = useConfirmedTransaction();
+  const { hash: txHash, isPending: isTxPending, isWaitingForReceipt, isSuccess: isReceiptSuccess, error: writeError } = transaction;
+  const receiptError = null;
+  const receiptData = transaction.receipt;
+  const { data: contractVersion } = useReadContract({ address: CONTRACT_ADDRESSES.PACTORA_ESCROW, abi: PACTORA_ESCROW_ABI, functionName: "VERSION", chainId: 31611 });
 
   // Calculate sum of milestones
-  const totalAmount = milestones.reduce((sum, m) => {
-    const val = parseFloat(m.amount);
-    return sum + (isNaN(val) ? 0 : val);
-  }, 0);
+  let totalAmount: bigint | null = null;
+  try { totalAmount = milestones.reduce((sum, milestone) => sum + parseMusdAmount(milestone.amount), 0n); } catch { /* Incomplete form inputs are not balances. */ }
+  const totalAmountLabel = totalAmount === null ? "Enter valid amounts" : formatMusdAmount(totalAmount);
 
   const handleAddMilestone = () => {
     if (milestones.length >= 20) return;
     setMilestones([
       ...milestones,
-      { title: `Milestone ${milestones.length + 1}`, amount: "500", description: "" },
+      { title: "", amount: "", description: "", deliveryDeadline: "" },
     ]);
   };
 
@@ -92,12 +96,12 @@ export default function CreateAgreementPage() {
     setFormError(null);
 
     if (currentStep === 1) {
-      if (!title.trim()) {
-        setFormError("Agreement title is required.");
+      if (title.trim().length < 3 || title.length > 120 || description.length > 2000) {
+        setFormError("Use a 3-120 character title and at most 2000 description characters.");
         return;
       }
       const cleanProvider = providerAddress.trim().toLowerCase();
-      if (!/^0x[a-f0-9]{40}$/.test(cleanProvider)) {
+      if (!/^0x[a-f0-9]{40}$/.test(cleanProvider) || /^0x0{40}$/.test(cleanProvider)) {
         setFormError("Invalid provider address. Must be a valid 42-character 0x EVM address.");
         return;
       }
@@ -113,15 +117,14 @@ export default function CreateAgreementPage() {
       }
       for (let i = 0; i < milestones.length; i++) {
         const m = milestones[i];
-        const val = parseFloat(m.amount);
-        if (isNaN(val) || val <= 0) {
-          setFormError(`Milestone #${i + 1} amount must be greater than zero.`);
+        try { if (parseMusdAmount(m.amount) <= 0n) throw new Error(); } catch {
+          setFormError(`Milestone #${i + 1} needs a positive amount with at most 18 decimals.`); return;
+        }
+        if (!m.title.trim() || m.title.length > 100 || m.description.length > 500) {
+          setFormError(`Milestone #${i + 1} needs a 1-100 character title and at most 500 description characters.`);
           return;
         }
-        if (!m.title.trim()) {
-          setFormError(`Milestone #${i + 1} requires a title.`);
-          return;
-        }
+        if (!Number.isFinite(new Date(m.deliveryDeadline).getTime()) || new Date(m.deliveryDeadline).getTime() <= Date.now()) { setFormError(`Milestone #${i + 1} needs a future delivery deadline.`); return; }
       }
       setCurrentStep(3);
     }
@@ -129,6 +132,7 @@ export default function CreateAgreementPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting || transaction.busy) return;
     setFormError(null);
 
     if (!isConnected || !address) {
@@ -136,25 +140,17 @@ export default function CreateAgreementPage() {
       return;
     }
 
+    if (contractVersion !== 2n) { setFormError("Pactora V2 must be deployed before new agreements can be created. The legacy contract is read-only in this app."); return; }
     const cleanProvider = providerAddress.trim().toLowerCase();
 
     setIsSubmitting(true);
     try {
-      // Convert amounts to 18 decimals
-      const milestoneAmounts = milestones.map((m) => parseUnits(m.amount, 18));
-
-      // Compute termsHash
-      const termsContent = JSON.stringify({
-        title,
-        description,
-        client: address.toLowerCase(),
-        provider: cleanProvider,
-        milestones,
-      });
-      const termsHash = keccak256(stringToBytes(termsContent));
-
-      // 1. Send transaction to PactoraEscrow contract
-      const hash = await writeContractAsync({
+      const details = milestones.map((milestone) => ({ title: milestone.title.trim(), amount: milestone.amount, description: milestone.description, deliveryDeadline: Math.floor(new Date(milestone.deliveryDeadline).getTime() / 1000) }));
+      const terms = { title: title.trim(), description, clientAddress: address.toLowerCase(), providerAddress: cleanProvider, milestoneDetails: details };
+      const milestoneAmounts = details.map((milestone) => parseMusdAmount(milestone.amount));
+      const total = milestoneAmounts.reduce((sum, amount) => sum + amount, 0n);
+      const termsHash = hashAgreementTerms(terms);
+      const confirmed = await transaction.execute(() => writeContractAsync({
         address: CONTRACT_ADDRESSES.PACTORA_ESCROW,
         abi: PACTORA_ESCROW_ABI,
         functionName: "createAgreement",
@@ -162,36 +158,29 @@ export default function CreateAgreementPage() {
           cleanProvider as `0x${string}`,
           CONTRACT_ADDRESSES.MUSD,
           milestoneAmounts,
+          details.map((milestone) => BigInt(milestone.deliveryDeadline)),
           termsHash,
         ],
-      });
-
-      console.log("Transaction broadcasted:", hash);
-
-      const tempOnChainId = Date.now() % 1000000;
-
-      // 2. Persist off-chain metadata
-      await fetch("/api/agreements", {
+        chainId: 31611,
+        account: address,
+      }), false);
+      if (!confirmed) return;
+      const event = parseEventLogs({ abi: PACTORA_ESCROW_ABI, logs: confirmed.logs.filter((log) => log.address.toLowerCase() === CONTRACT_ADDRESSES.PACTORA_ESCROW.toLowerCase()), eventName: "AgreementCreated" })[0];
+      if (!event || event.args.client.toLowerCase() !== address.toLowerCase()) throw new Error("Confirmed receipt does not contain this wallet's AgreementCreated event.");
+      const onChainId = Number(event.args.agreementId);
+      if (!Number.isSafeInteger(onChainId) || onChainId > 2_147_483_647) throw new Error("Agreement ID exceeds metadata support; use the explorer receipt.");
+      const body = { ...terms, onChainId, termsHash, creationTxHash: confirmed.transactionHash, tokenAddress: CONTRACT_ADDRESSES.MUSD, totalAmount: formatMusdAmount(total) };
+      setRegistration({ id: onChainId, body });
+      await jsonRequest("/api/agreements", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          onChainId: tempOnChainId,
-          title,
-          description,
-          termsHash,
-          clientAddress: address.toLowerCase(),
-          providerAddress: cleanProvider,
-          tokenAddress: CONTRACT_ADDRESSES.MUSD,
-          totalAmount: totalAmount.toString(),
-          milestoneDetails: milestones,
-        }),
+        body: JSON.stringify(body),
       });
-
-      // Redirect to dashboard
-      router.push(`/dashboard`);
-    } catch (err: any) {
-      console.error("Failed to create agreement:", err);
-      setFormError(err?.shortMessage || err?.message || "Transaction rejected or failed.");
+      setRegistration(null);
+      await transaction.notifyConfirmed(confirmed.transactionHash);
+      router.push(`/agreements/${onChainId}`);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Agreement could not be created or its terms could not be registered.");
     } finally {
       setIsSubmitting(false);
     }
@@ -199,6 +188,10 @@ export default function CreateAgreementPage() {
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
+      <TestnetGuard />
+      <WalletSessionControls />
+      {contractVersion !== 2n && <p role="status" className="text-sm text-amber-200">New agreements require the approved V2 testnet deployment. Existing escrow receipts remain read-only.</p>}
+      {registration && <div className="space-y-2 text-sm"><p>Agreement #{registration.id} is confirmed on-chain. Its terms registration still needs to succeed; do not create a duplicate.</p><Button variant="outline" isLoading={isSubmitting} onClick={() => { setIsSubmitting(true); void jsonRequest("/api/agreements", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(registration.body) }).then(() => router.push(`/agreements/${registration.id}`)).catch((error: unknown) => setFormError(error instanceof Error ? error.message : "Registration failed.")).finally(() => setIsSubmitting(false)); }}>Retry verified terms registration</Button></div>}
       {/* Header */}
       <div>
         <div className="flex items-center gap-2">
@@ -255,6 +248,7 @@ export default function CreateAgreementPage() {
 
       {/* Wizard Step Views with Slide Transition */}
       <form onSubmit={handleSubmit}>
+        <fieldset disabled={isSubmitting || transaction.busy}>
         <AnimatePresence mode="wait">
           {/* STEP 1: Parties & Terms */}
           {currentStep === 1 && (
@@ -360,7 +354,7 @@ export default function CreateAgreementPage() {
                       Escrow Total
                     </span>
                     <p className="text-base font-bold font-mono text-teal-300">
-                      {totalAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MUSD
+                      {totalAmountLabel} MUSD
                     </p>
                   </div>
                 </CardHeader>
@@ -408,16 +402,21 @@ export default function CreateAgreementPage() {
                             Amount (MUSD) *
                           </label>
                           <AnimatedInput
-                            type="number"
-                            step="any"
-                            min="0.01"
-                            placeholder="500"
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="Amount with up to 18 decimals"
                             value={m.amount}
                             onChange={(e) => handleUpdateMilestone(idx, "amount", e.target.value)}
                             className="font-mono font-medium"
                             required
                           />
                         </div>
+                      </div>
+
+                      <div>
+                        <label htmlFor={`deadline-${idx}`} className="block text-sm font-medium text-slate-300 mb-2">Delivery deadline (your local time) *</label>
+                        <AnimatedInput id={`deadline-${idx}`} type="datetime-local" value={m.deliveryDeadline} onChange={(event) => handleUpdateMilestone(idx, "deliveryDeadline", event.target.value)} required />
+                        <p className="mt-2 text-xs text-slate-300">Agreed on-chain when the provider accepts. Unsubmitted work can be refunded after this deadline. Submitted work has seven days for review; a rejection grants seven days to resubmit.</p>
                       </div>
 
                       <div>
@@ -494,7 +493,7 @@ export default function CreateAgreementPage() {
 
                     <div className="rounded-xl bg-slate-900/70 p-3.5 border border-slate-800">
                       <span className="text-slate-400 block mb-1">Provider Address</span>
-                      <p className="font-mono text-teal-300 text-xs truncate">{providerAddress}</p>
+                      <p className="font-mono text-teal-300 text-xs break-all">{providerAddress.toLowerCase()}</p>
                     </div>
                   </div>
 
@@ -502,15 +501,13 @@ export default function CreateAgreementPage() {
                   <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 space-y-2.5">
                     <div className="flex items-center justify-between text-xs font-semibold text-slate-300 pb-2 border-b border-slate-800">
                       <span>Milestones ({milestones.length})</span>
-                      <span className="font-mono text-teal-400">Total: {totalAmount.toFixed(2)} MUSD</span>
+                      <span className="font-mono text-teal-400">Total: {totalAmountLabel} MUSD</span>
                     </div>
                     {milestones.map((m, idx) => (
                       <div key={idx} className="flex items-center justify-between text-xs text-slate-300">
-                        <span className="truncate max-w-sm">
-                          {idx + 1}. {m.title}
-                        </span>
+                        <div><span>{idx + 1}. {m.title}</span><p className="mt-1 text-slate-400">Due: {new Date(m.deliveryDeadline).toISOString()}</p></div>
                         <span className="font-mono font-bold text-slate-200">
-                          {parseFloat(m.amount).toFixed(2)} MUSD
+                          {m.amount} MUSD
                         </span>
                       </div>
                     ))}
@@ -522,11 +519,12 @@ export default function CreateAgreementPage() {
                     <div className="text-xs text-slate-300 leading-relaxed">
                       <p className="font-semibold text-white">Pre-Flight Escrow Disclosure</p>
                       <p className="mt-1">
-                        • <b>Non-Custodial:</b> Funds are held in audited Solidity escrow on Mezo Testnet.
+                        <b>Non-Custodial:</b> Funds are held in unaudited Solidity escrow on Mezo Testnet.
                       </p>
                       <p>
-                        • <b>Two-Step Funding:</b> Creation only registers the agreement. After the provider accepts terms, you will deposit <b>{totalAmount.toFixed(2)} MUSD</b>.
+                        <b>Two-Step Funding:</b> Creation only registers the agreement. After the provider accepts terms, you will deposit <b>{totalAmountLabel} MUSD</b>.
                       </p>
+                      <p className="mt-2">Token contract: <a className="break-all text-teal-300 underline" href={`https://explorer.test.mezo.org/token/${CONTRACT_ADDRESSES.MUSD}`} target="_blank" rel="noreferrer">{CONTRACT_ADDRESSES.MUSD}</a></p>
                     </div>
                   </div>
                 </CardContent>
@@ -555,6 +553,7 @@ export default function CreateAgreementPage() {
 
                 <Button
                   type="submit"
+                  disabled={contractVersion !== 2n || transaction.isSuccess}
                   isLoading={isSubmitting || isTxPending || isWaitingForReceipt}
                   size="lg"
                   className="gap-2 font-semibold shadow-xl shadow-teal-500/25"
@@ -563,13 +562,14 @@ export default function CreateAgreementPage() {
                     ? "Mining on Mezo..."
                     : isTxPending
                     ? "Sign in Wallet..."
-                    : `Deploy Agreement (${totalAmount.toFixed(2)} MUSD)`}
+                    : `Create Agreement (${totalAmountLabel} MUSD)`}
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
+        </fieldset>
       </form>
     </div>
   );

@@ -47,14 +47,14 @@ graph TB
 
 ## 2. Smart Contract State Machine
 
-The core escrow logic is governed by `PactoraEscrow.sol`. Funds can remain locked if a party disappears; there is currently no timeout withdrawal or provider-no-show refund.
+The V2 source has agreed milestone delivery deadlines, seven-day review claims and guarded no-show refunds. V1 has none of these and remains immutable; deployment verification must identify the actual configured version.
 
 ### Agreement States
 - **Created (0):** The agreement is initialized by the creator specifying the client, provider, milestone breakdown, and terms hash (`keccak256`).
 - **Accepted (1):** The provider counter-party signs acceptance of the terms.
 - **Funded (2):** The client deposits the total agreement amount in MUSD using safe ERC-20 transfer. Funds are held in contract escrow.
-- **Completed (3):** All milestones have reached `Approved` state and total funds have been disbursed to the provider.
-- **Cancelled (4):** Either party cancels an unfunded agreement, or any mutual-consent split is accepted, including a 100% provider release.
+- **Completed (3):** All escrow has been released to the provider, including a 100% provider mutual settlement.
+- **Cancelled (4):** Either party cancels an unfunded agreement, or a funded agreement settles with any client refund.
 
 ```mermaid
 stateDiagram-v2
@@ -64,7 +64,8 @@ stateDiagram-v2
     Accepted --> Cancelled: Either party calls cancelUnfundedAgreement()
     Accepted --> Funded: Client approves & deposits MUSD
     Funded --> Completed: All milestones approved & released
-    Funded --> Cancelled: acceptResolutionProposal() executes mutual split
+    Funded --> Completed: Mutual split releases all remaining funds
+    Funded --> Cancelled: Settlement includes any refund
 ```
 
 ### Milestone Lifecycle
@@ -76,9 +77,13 @@ stateDiagram-v2
     [*] --> Pending
     Pending --> Submitted: Provider calls submitMilestone(proofHash)
     Submitted --> Approved: Client calls approveMilestone() [Releases MUSD]
+    Submitted --> Approved: Provider claims after seven-day review window
     Submitted --> Rejected: Client calls rejectMilestone(reasonHash)
     Rejected --> Submitted: Provider re-submits corrected proof
+    Pending --> Refunded: Client refunds at agreed delivery cutoff
+    Rejected --> Refunded: Client refunds after agreed revision grace
     Approved --> [*]: Finalized
+    Refunded --> [*]: Finalized
 ```
 
 ---
@@ -91,11 +96,11 @@ If work is contested or scope changes occur mid-project, Pactora implements an *
 2. The contract validates the fundamental economic invariant:
    $$\text{clientRefund} + \text{providerRelease} = \text{totalAmount} - \text{releasedAmount} - \text{refundedAmount}$$
 3. The opposing party reviews the proposed split on-chain.
-4. When the counter-party executes `acceptResolutionProposal(agreementId)`, the smart contract atomically:
+4. When the counter-party executes `acceptResolutionProposal(agreementId, expectedProposalHash)`, the smart contract atomically:
    - Transfers $\text{clientRefund}$ MUSD back to the client.
    - Transfers $\text{providerRelease}$ MUSD to the provider.
-    - Marks the agreement state as `Cancelled` for every split.
-    - Emits `ResolutionAccepted(agreementId, clientRefund, providerRelease)` and `AgreementCancelled`.
+    - Closes as `Completed` if nothing is refunded, otherwise `Cancelled`.
+    - Emits `ResolutionAccepted` with the reviewed proposal hash and the terminal state event.
 
 ---
 
@@ -112,9 +117,9 @@ sequenceDiagram
     participant TG as Telegram Bot API
     actor Device as User Telegram App
 
-    User->>App: Connects wallet & requests Telegram link
-    App->>DB: Generates 32-byte secure random link token (15-min expiry)
-    App-->>User: Displays Deep Link (t.me/PactoraBot?start=link_TOKEN)
+    User->>App: Signs a five-minute nonce and requests own-wallet link
+    App->>DB: Stores only token hash with signed-session provenance
+    App-->>User: Displays configured bot deep link (15-min expiry)
     User->>Device: Clicks deep link & sends /start link_TOKEN
     Device->>TG: Messages bot
     TG->>App: Webhook POST /api/telegram/webhook (X-Telegram-Bot-Api-Secret-Token verified)

@@ -8,6 +8,13 @@
       "when": 1792445606160,
       "tag": "0000_lively_random",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794072317497,
+      "tag": "0001_cute_talisman",
+      "breakpoints": true
     }
   ]
 }

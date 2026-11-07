@@ -1,9 +1,9 @@
-/**
- * Telegram Bot API client and notification dispatchers
- */
+import "server-only";
+import { ApiError, getAppUrl } from "@/lib/security/api";
 
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const APP_URL = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "https://pactora.vercel.app";
+export function escapeHtml(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
 
 export interface SendMessageOptions {
   parse_mode?: "HTML" | "Markdown" | "MarkdownV2";
@@ -18,32 +18,35 @@ export async function sendTelegramMessage(
   text: string,
   options: SendMessageOptions = { parse_mode: "HTML" }
 ): Promise<boolean> {
+  const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
   if (!BOT_TOKEN) {
     console.warn("TELEGRAM_BOT_TOKEN is not set; skipping Telegram message delivery.");
     return false;
   }
 
   try {
+    const footer = `\n\n<a href="${getAppUrl()}/dashboard">Open Pactora</a> | <a href="https://explorer.test.mezo.org">Mezo Testnet explorer</a>`;
     const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         chat_id: chatId,
-        text,
+        text: text + footer,
         parse_mode: options.parse_mode,
-        disable_web_page_preview: options.disable_web_page_preview ?? false,
+        disable_web_page_preview: options.disable_web_page_preview ?? true,
       }),
+      signal: AbortSignal.timeout(8000),
     });
 
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      console.error("Telegram API error response:", errData);
+    const result = await res.json().catch(() => null);
+    if (!res.ok || result?.ok !== true || !Number.isSafeInteger(result?.result?.message_id)) {
+      console.error("Telegram delivery rejected", { status: res.status });
       return false;
     }
 
     return true;
-  } catch (err) {
-    console.error("Failed to send Telegram message:", err);
+  } catch {
+    console.error("Telegram delivery unavailable", { code: "TELEGRAM_UNAVAILABLE" });
     return false;
   }
 }
@@ -52,65 +55,8 @@ export async function sendTelegramMessage(
  * Build deep link URL to link account with Telegram bot
  */
 export function getTelegramBotLinkUrl(token: string): string {
-  const botUsername = process.env.TELEGRAM_BOT_USERNAME || "PactoraEscrowBot";
-  return `https://t.me/${botUsername}?start=${token}`;
+  const botUsername = process.env.TELEGRAM_BOT_USERNAME;
+  if (!botUsername || !/^[a-zA-Z][a-zA-Z0-9_]{4,31}$/.test(botUsername)) throw new ApiError(503, "Telegram bot username is not configured", "CONFIGURATION_REQUIRED");
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new ApiError(400, "Invalid link token", "INVALID_LINK_TOKEN");
+  return `https://t.me/${botUsername}?start=link_${token}`;
 }
-
-/**
- * Pre-formatted notification templates for blockchain and agreement events
- */
-export const TelegramNotifications = {
-  agreementCreated: (agreementId: number, title: string, amount: string, counterparty: string) =>
-    `🤝 <b>Pactora: New Agreement Created</b>\n\n` +
-    `<b>Agreement:</b> #${agreementId} - ${title}\n` +
-    `<b>Total:</b> ${amount} MUSD\n` +
-    `<b>Created by:</b> <code>${counterparty}</code>\n\n` +
-    `👉 <a href="${APP_URL}/agreements/${agreementId}">Review Agreement in Pactora</a>`,
-
-  agreementAccepted: (agreementId: number, title: string, provider: string) =>
-    `✅ <b>Pactora: Agreement Accepted</b>\n\n` +
-    `Provider <code>${provider}</code> accepted terms for <b>Agreement #${agreementId}</b> (${title}).\n\n` +
-    `Funds can now be deposited into escrow.\n` +
-    `👉 <a href="${APP_URL}/agreements/${agreementId}">Fund Escrow in Pactora</a>`,
-
-  agreementFunded: (agreementId: number, title: string, amount: string, txHash?: string) =>
-    `🔒 <b>Pactora: Escrow Funded in MUSD</b>\n\n` +
-    `Agreement #${agreementId} (${title}) has been funded with <b>${amount} MUSD</b>.\n` +
-    `Funds are locked on Mezo Testnet smart contract.\n` +
-    (txHash ? `Tx: <code>${txHash.slice(0, 10)}...${txHash.slice(-8)}</code>\n\n` : "\n") +
-    `👉 <a href="${APP_URL}/agreements/${agreementId}">Open Workspace</a>`,
-
-  milestoneSubmitted: (agreementId: number, milestoneIndex: number, title: string) =>
-    `📤 <b>Pactora: Milestone Submitted for Review</b>\n\n` +
-    `Milestone #${milestoneIndex + 1} has been submitted for review on <b>Agreement #${agreementId}</b> (${title}).\n\n` +
-    `👉 <a href="${APP_URL}/agreements/${agreementId}">Inspect Deliverable & Approve</a>`,
-
-  milestoneApproved: (
-    agreementId: number,
-    milestoneIndex: number,
-    amount: string,
-    txHash?: string
-  ) =>
-    `🎉 <b>Pactora: Milestone Approved & Payment Released</b>\n\n` +
-    `Milestone #${milestoneIndex + 1} approved! <b>${amount} MUSD</b> has been transferred to provider.\n` +
-    (txHash ? `Tx: <code>${txHash.slice(0, 10)}...${txHash.slice(-8)}</code>\n\n` : "\n") +
-    `👉 <a href="${APP_URL}/receipts/${agreementId}">View Verifiable Receipt</a>`,
-
-  milestoneRejected: (agreementId: number, milestoneIndex: number, reason: string) =>
-    `⚠️ <b>Pactora: Milestone Rejected</b>\n\n` +
-    `Milestone #${milestoneIndex + 1} was rejected by client for <b>Agreement #${agreementId}</b>.\n` +
-    `<b>Reason:</b> ${reason}\n\n` +
-    `👉 <a href="${APP_URL}/agreements/${agreementId}">Open Agreement to Revise</a>`,
-
-  resolutionProposed: (
-    agreementId: number,
-    clientRefund: string,
-    providerRelease: string
-  ) =>
-    `⚖️ <b>Pactora: Mutual Resolution Proposed</b>\n\n` +
-    `A resolution was proposed for Agreement #${agreementId}.\n` +
-    `• Refund to Client: <b>${clientRefund} MUSD</b>\n` +
-    `• Release to Provider: <b>${providerRelease} MUSD</b>\n\n` +
-    `👉 <a href="${APP_URL}/agreements/${agreementId}">Review Proposal in Pactora</a>`,
-};
-

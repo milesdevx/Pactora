@@ -5,26 +5,22 @@ import {Script, console} from "forge-std/Script.sol";
 import {PactoraEscrow} from "../src/PactoraEscrow.sol";
 
 contract DeployPactoraEscrow is Script {
-    // Verified Mezo Testnet MUSD address
+    // Canonical MUSD from the official Mezo testnet configuration.
+    // https://mezo.org/docs/developers/getting-started/musd-payments-x402/#mezo-x402-reference
     address public constant MEZO_TESTNET_MUSD = 0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503;
+    uint256 public constant MEZO_TESTNET_CHAIN_ID = 31611;
+
+    error NotMezoTestnet();
 
     function run() external returns (PactoraEscrow escrow) {
-        uint256 deployerPrivateKey = vm.envOr("PRIVATE_KEY", uint256(0));
-        address musdAddress = vm.envOr("MUSD_ADDRESS", MEZO_TESTNET_MUSD);
+        if (block.chainid != MEZO_TESTNET_CHAIN_ID) revert NotMezoTestnet();
+        vm.startBroadcast();
 
-        if (deployerPrivateKey != 0) {
-            vm.startBroadcast(deployerPrivateKey);
-        } else {
-            vm.startBroadcast();
-        }
-
-        // Deploy with MUSD as default allowed token, allowlist enforcement disabled to allow custom ERC20s if needed
-        escrow = new PactoraEscrow(musdAddress, false);
+        escrow = new PactoraEscrow(MEZO_TESTNET_MUSD, true);
 
         vm.stopBroadcast();
 
         console.log("PactoraEscrow deployed to:", address(escrow));
-        console.log("Configured MUSD token:", musdAddress);
+        console.log("Configured MUSD token:", MEZO_TESTNET_MUSD);
     }
 }
-
