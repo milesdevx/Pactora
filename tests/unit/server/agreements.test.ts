@@ -191,4 +191,38 @@ describe("Agreement route ownership and immutable metadata (Illustration fixture
     expect(result).toEqual({ error: "Service temporarily unavailable", code: "SERVICE_UNAVAILABLE" });
     expect(vi.mocked(console.error).mock.calls.some((args) => JSON.stringify(args).includes(env.rateSecret))).toBe(false);
   });
+
+  it("treats on-chain agreement with client == address(0) as not found on-chain", async () => {
+    chain.agreement.client = "0x0000000000000000000000000000000000000000";
+    chain.agreement.provider = "0x0000000000000000000000000000000000000000";
+    chain.agreement.id = 0n;
+    const response = await detailGet(request("/api/agreements/910954", undefined, authHeaders()), params("910954"));
+    expect(response.status).toBe(404);
+    expect((await response.json()).code).toBe("AGREEMENT_NOT_FOUND");
+    expect(fixture.queries("select", agreementMetadata).length).toBe(0);
+  });
+
+  it("decodes onChainId from AgreementCreated log and ensures non-zero parties", async () => {
+    // Valid on-chain receipt decoding
+    const onChainAgreementId = 7n;
+    boundary.rpc.readContract.mockImplementation(({ functionName }: { functionName: string }) => {
+      if (functionName === "getAgreementCount") return Promise.resolve(10n);
+      if (functionName === "getAgreement") return Promise.resolve(chain.agreement);
+      if (functionName === "getMilestones") return Promise.resolve(chain.milestones);
+      throw new Error("Unexpected Illustration RPC operation");
+    });
+    boundary.rpc.getTransactionReceipt.mockResolvedValue(receipt([creationLog(ESCROW, onChainAgreementId, 0, body.termsHash)]));
+    chain.agreement.id = onChainAgreementId;
+    chain.agreement.client = WALLET;
+    chain.agreement.provider = PROVIDER;
+
+    const response = await createPost(request("/api/agreements", { ...body, onChainId: 7 }, authHeaders()));
+    expect(response.status).toBe(201);
+    const created = (await response.json()).agreement;
+    expect(created.onChainId).toBe(7);
+    expect(created.clientAddress).toBe(WALLET);
+    expect(created.providerAddress).toBe(PROVIDER);
+    expect(created.clientAddress).not.toBe("0x0000000000000000000000000000000000000000");
+    expect(created.providerAddress).not.toBe("0x0000000000000000000000000000000000000000");
+  });
 });
