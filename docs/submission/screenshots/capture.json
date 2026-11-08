@@ -1,0 +1,29 @@
+{
+  "note": "Real live-page screenshots, no wallet/provider injection and no simulated transactions.",
+  "captures": [
+    {
+      "file": "docs\\submission\\screenshots\\live-v1-help-desktop.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "url": "https://pactora-tan.vercel.app/help",
+      "status": 200,
+      "contentRendered": true,
+      "capturedAt": "2026-11-08T15:22:43.565Z",
+      "release": "Existing live V1; not V2 deployment or payment evidence"
+    },
+    {
+      "file": "docs\\submission\\screenshots\\live-v1-help-mobile.png",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "url": "https://pactora-tan.vercel.app/help",
+      "status": 200,
+      "contentRendered": true,
+      "capturedAt": "2026-11-08T15:22:45.979Z",
+      "release": "Existing live V1; not V2 deployment or payment evidence"
+    }
+  ]
+}

@@ -1,190 +1,126 @@
-# Pactora — Milestone-Based MUSD Escrow for the Mezo Ecosystem
+# Pactora: MUSD Milestone Escrow on Mezo
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Mezo Testnet](https://img.shields.io/badge/Mezo%20Testnet-Chain%20ID%2031611-orange)](https://explorer.test.mezo.org)
-[![Next.js](https://img.shields.io/badge/Next.js-15.5-black)](https://nextjs.org/)
-[![Foundry](https://img.shields.io/badge/Foundry-Tested-blue)](https://getfoundry.sh/)
+[![V1 Demo](https://img.shields.io/badge/V1_demo-live-orange)](https://pactora-tan.vercel.app)
+[![Mezo Testnet](https://img.shields.io/badge/Mezo_Testnet-31611-blue)](https://explorer.test.mezo.org)
 [![CI](https://github.com/milesdevx/Pactora/actions/workflows/ci.yml/badge.svg)](https://github.com/milesdevx/Pactora/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue)](LICENSE)
 
-> **Work agreed. Funds protected. Payments verified.**  
-> Pactora is a non-custodial milestone escrow and payment coordination protocol built specifically for freelancers, agencies, and clients operating within the Mezo ecosystem.
+Pactora coordinates MUSD milestone payments between freelancers and clients on Mezo Testnet. Wallets authorize agreement acceptance, funding, delivery and payouts; Telegram helps participants understand balances and the next action.
 
----
+**Submission status, checked November 8, 2026:** the existing **V1 demo is live**, but the hardened **V2 contract and app are not deployed**. Local tests are not live payment or Telegram-delivery proof. Do not fund the legacy address as if it had been upgraded. The submission pack is a draft, not a finished deck/video or verified release.
 
-## 🚀 Key Highlights
+- Existing live V1: https://pactora-tan.vercel.app
+- Public repository: https://github.com/milesdevx/Pactora
+- Actual bot: https://t.me/PactoraAlertsBot
+- [Deployment evidence and pending release gates](docs/deployments.md)
+- [Draft AKINDO form](docs/submission/akindo-form.md), [deck outline](docs/submission/deck-outline.md), [pitch script](docs/submission/pitch-script-2min.md), [Wave 2 plan](docs/submission/wave2-plan.md)
 
-- **Native to Mezo:** Built around Mezo's Bitcoin-based gas economics and canonical **MUSD** stablecoin.
-- **Non-Custodial Escrow (`PactoraEscrow.sol`):** Funds are locked in smart contract escrow with OpenZeppelin `ReentrancyGuard` and strict mathematical invariants ($\sum \text{milestones} = \text{total}$).
-- **Mutual Consent Settlement:** On-chain mutual-consent split of the remaining escrow. Pactora does not arbitrate subjective disputes.
-- **Telegram Coordination:** Wallet linking, notification preferences, and agreement lookup. Confirmed-event notifications are being hardened before submission.
-- **Honest Data:** Wagmi v2 + Viem read Mezo Testnet. The homepage preview is explicitly labelled "Illustration, not real funds"; it is not deployment or payment evidence.
+The public repository is currently behind the locally committed fixes. CI is configured locally; no green remote run is claimed until the intended commits are published and checked.
 
----
+## Why Pactora Fits Mezo
 
-## 🌐 Verified Mezo Network Parameters
+**Track 2: Access and Distribution.** MUSD is the actual deposit and payout asset, and BTC is Mezo's gas currency. Pactora adds a concrete payment use case to MUSD and uses Telegram to reduce coordination and test-funding friction. `/getmusd` points to the existing Mezo faucet and swap/borrowing app; no invented Passport, yield, or borrowing integration is claimed. MEZO funding is a roadmap item, not a shipped feature.
 
-Verified against official [Mezo Documentation](https://mezo.org/docs/developers/):
+## Implemented V2 Source
 
-| Property | Value | Notes |
-| :--- | :--- | :--- |
-| **Network Name** | Mezo Testnet | Public EVM testnet |
-| **Chain ID** | `31611` (`0x7b7b`) | Verified via `eth_chainId` |
-| **Gas Currency** | `BTC` | 18 decimals |
-| **Default RPC** | `https://rpc.test.mezo.org` | Canonical endpoint |
-| **Failover RPC** | `https://mezo-testnet.drpc.org` | Secondary provider |
-| **Block Explorer** | `https://explorer.test.mezo.org` | Blockscout explorer |
-| **Canonical MUSD** | `0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503` | Verified 18 decimals |
+- Milestone escrow with explicit provider acceptance, exact MUSD allowance/funding, submission, client approval/rejection and public receipts.
+- Agreed future delivery deadlines, seven-day review-timeout claims and seven-day rejection/resubmission grace. No-show refunds affect only eligible unsettled milestones.
+- Hash-bound mutual-consent settlement. It is not subjective dispute arbitration; a fully released settlement is `Completed`, while settlement with any refund is `Cancelled`.
+- OpenZeppelin `ReentrancyGuard` and `SafeERC20`, exact sender/receiver balance changes, token contract validation, and an enforced MUSD allowlist in the deployment script.
+- Server-verified SIWE-style signed nonces, five-minute atomic consumption, hashed DB session tokens, protected metadata/link APIs and persistent PostgreSQL rate limits.
+- Constant-time secret-token header verification, not HMAC; unique Telegram update deduplication, hashed one-time linking and confirmed-receipt notification checks.
+- Exact bigint monetary formatting, explicit testnet/account writes, money-action confirmation, real receipt-derived agreement IDs and evidence text verified against chain hashes.
+- `/balance`, `/agreements`, `/pending`, `/getmusd`, `/help`, `/notifications` and `/unlink` in the new bot source.
 
----
+These features are locally implemented/tested. The current public V1 deployment must not be represented as possessing the new guarantees.
 
-## 🛠 Tech Stack
+## Network and Deployment
 
-- **Smart Contracts:** Solidity `^0.8.24`, Foundry (`forge`), OpenZeppelin Contracts (ReentrancyGuard, SafeERC20).
-- **Web Application:** Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS, Lucide Icons.
-- **Web3 Connectivity:** Wagmi v2, Viem, TanStack Query.
-- **Database & ORM:** PostgreSQL, Drizzle ORM, Drizzle Kit.
-- **Notification Services:** Telegram Bot API, secret-token header verification (not HMAC), single-use CSPRNG tokens. Constant-time enforcement and atomic consumption are release gates, not assumed guarantees.
-- **Testing:** Foundry (Solidity unit and fuzz tests), Vitest (schemas, crypto, components), Playwright (desktop/mobile public-page smoke test).
+| Parameter | Value |
+| --- | --- |
+| Chain | **Mezo Testnet** |
+| Chain ID | **31611**, hex `0x7b7b` |
+| Native gas | **BTC**, 18 decimals |
+| RPC | https://rpc.test.mezo.org |
+| Explorer | https://explorer.test.mezo.org |
+| Canonical MUSD | `0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503`, 18 decimals |
+| Existing legacy V1 escrow | `0x1Da50726E11bf828358f6b840900c0a731B2b40F` |
+| Verified V2 address / deployment hash | **Pending owner redeploy** |
 
----
+[Official Mezo network guide](https://mezo.org/docs/developers/getting-started/) and [MUSD reference](https://mezo.org/docs/developers/getting-started/musd-payments-x402/#mezo-x402-reference).
 
-## 📁 Repository Structure
+## Try It
 
-```
-├── contracts/                  # Foundry smart contract project
-│   ├── src/
-│   │   └── PactoraEscrow.sol   # Core milestone escrow implementation
-│   ├── test/
-│   │   ├── PactoraEscrow.t.sol # Unit, invariant, fuzz, & reentrancy test suite
-│   │   └── mocks/              # MockERC20 & MaliciousERC20 for security testing
-│   ├── script/
-│   │   └── DeployPactoraEscrow.s.sol # Testnet deployment script
-│   └── foundry.toml
-├── app/                        # Next.js 15 App Router
-│   ├── api/                    # Serverless API routes (auth, telegram, agreements)
-│   ├── dashboard/              # User dashboard & agreement tracking
-│   ├── agreements/
-│   │   ├── create/             # Milestone builder & deployment form
-│   │   └── [id]/               # Agreement timeline, submit/approve, mutual dispute
-│   ├── receipts/[id]/          # Public verifiable audit receipt
-│   ├── settings/telegram/      # Telegram account linking & notification center
-│   └── help/                   # Documentation & testnet faucet guide
-├── components/                 # Reusable UI components & Wagmi provider
-├── lib/
-│   ├── chain/                  # Mezo chain configuration & typed ABIs
-│   ├── db/                     # Drizzle ORM schema & client
-│   ├── security/               # Signed nonces, token hashing, crypto helpers
-│   ├── telegram/               # Bot API client & notification message templates
-│   └── validation/             # Zod input validation schemas
-├── drizzle/                    # Generated SQL database migrations
-└── docs/                       # Architecture, security, and demo specifications
-    ├── architecture.md
-    ├── security.md
-    ├── demo-script.md
-    └── network-config.md
-```
+The existing live site's [help page](https://pactora-tan.vercel.app/help) is available for read-only network information. The safe flow below is for the **verified V2 release after the deployment gates pass**, not a promise that today's V1 is upgraded.
 
----
+1. Select Mezo Testnet `31611`. Obtain test BTC at https://faucet.test.mezo.org/ using your wallet address and CAPTCHA.
+2. Open https://testnet.mezo.org and swap test BTC for MUSD or use BTC-backed MUSD borrowing. The faucet offers BTC/MEZO, not direct MUSD; review any borrowing minimum/terms. Retain test BTC for gas.
+3. Verify the actual V2 escrow address in the deployment record before using two real test wallets. Keep all keys and seed phrases in your own wallets.
+4. As client, create amounts and future delivery deadlines. As provider, review and accept. As client, approve the exact token allowance, then fund escrow as a separate transaction.
+5. Submit actual deliverable notes or a URL. Approve one milestone and wait for the successful receipt. Inspect the real MUSD token, amount, recipient and transaction hash in the public receipt/explorer.
+6. Sign in with your wallet, generate a one-time link in Telegram settings, open the private bot chat and click Start. New source requires signed relinking for pre-upgrade unverified links.
+7. Use `/balance`, `/agreements`, `/pending` and `/getmusd`. Verify actual replies; a terminal formatter or local test is not proof of delivery.
 
-## ⚡ Quickstart & Local Setup
+The local homepage preview is visibly labelled **Illustration, not real funds**. It sends no transactions and is not payment evidence. Real screenshots in `docs/submission/screenshots/` show the existing V1 help page only.
 
-### 1. Prerequisites
-- **Node.js:** **22.x** (matches `engines.node`; pnpm can download the project-local runtime).
-- **pnpm:** **12.14.0**, pinned in `packageManager`. Native build permissions are already configured in `pnpm-workspace.yaml`.
-- **Foundry:** `forge` CLI installed using the [official installation guide](https://getfoundry.sh/introduction/installation/). On Windows, the executable may be under `$HOME\.foundry\bin\forge.exe`.
-- **PostgreSQL Database:** (Local PostgreSQL or Supabase/Neon instance)
+## Telegram Commands
 
-### 2. Clone and Install Dependencies
+| Command | Purpose in new source |
+| --- | --- |
+| `/start` | Welcome and wallet-linking instructions |
+| `/start link_<token>` | Consume the signed-session one-time private link |
+| `/balance` | Read linked wallet's canonical MUSD and test BTC gas balance |
+| `/agreements` | Confirm on-chain states and show the next action |
+| `/pending` | Funded milestones needing review or delivery |
+| `/getmusd` | Real Mezo faucet and testnet swap/borrowing guide |
+| `/notifications` | Toggle verified linked-wallet alerts |
+| `/unlink` | Disconnect the chat and revoke unused link tokens |
+| `/help` | Commands, test funds and wallet safety |
+
+There is no `/link` command. Money-moving actions are signed in the app/wallet, not Telegram. Available transaction hashes link to the Mezo explorer; read-only commands never invent a transaction hash. New-command live verification is still pending.
+
+## Local Setup: Windows PowerShell
+
+Use **Node 22.x**, **pnpm 12.14.0**, Foundry and a dedicated development PostgreSQL database. The package pins pnpm/runtime requirements; native build permissions are in `pnpm-workspace.yaml`, so `approve-builds --all` is not needed.
+
 ```powershell
 git clone https://github.com/milesdevx/Pactora.git
 Set-Location Pactora
-
-# Install web dependencies
 pnpm.cmd install --frozen-lockfile
-```
-
-### 3. Configure Environment Variables
-Copy the template to your local environment file:
-```powershell
 Copy-Item .env.example .env.local
 ```
-Fill in the required configuration variables:
-```env
-# Mezo Testnet (Chain ID 31611)
-NEXT_PUBLIC_CHAIN_ID=31611
-NEXT_PUBLIC_RPC_URL="https://rpc.test.mezo.org"
-NEXT_PUBLIC_EXPLORER_URL="https://explorer.test.mezo.org"
-NEXT_PUBLIC_MUSD_ADDRESS="0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503"
-NEXT_PUBLIC_PACTORA_ESCROW_ADDRESS="0x..." # Updated upon contract deployment
 
-# PostgreSQL Connection
-DATABASE_URL="postgres://postgres:password@localhost:5432/pactora"
+Configure the actual public escrow address and private server settings. Never commit the environment file or expose server secrets under `NEXT_PUBLIC_*`.
 
-# Telegram Bot Integration
-TELEGRAM_BOT_TOKEN="your_bot_token_from_botfather"
-TELEGRAM_BOT_USERNAME="PactoraAlertsBot"
-TELEGRAM_WEBHOOK_SECRET="random_secure_hex_secret_min_32_chars"
-```
+| Setting | Purpose |
+| --- | --- |
+| `NEXT_PUBLIC_PACTORA_ESCROW_ADDRESS` | Actual verified V2 contract; inlined at web build time |
+| `APP_URL` | Local origin for development; production must be HTTPS, using the actual production domain |
+| `DATABASE_URL` | Private PostgreSQL connection for sessions, metadata, rates and outbox |
+| `TELEGRAM_BOT_TOKEN` | Server-only bot credential |
+| `TELEGRAM_BOT_USERNAME` | Actual configured bot username |
+| `TELEGRAM_WEBHOOK_SECRET` | Strong random shared secret, never printed |
+| `RATE_LIMIT_SECRET` | At least 32 random bytes, conventionally 64 hex characters |
+| `ALLOW_TEST_NOTIFICATIONS` | Optional literal `true`; production testing is disabled otherwise |
 
-### 4. Database Setup
-Generate and apply database migrations using Drizzle:
+Wallet sessions use opaque tokens hashed in PostgreSQL. `SESSION_SECRET` and `LINK_TOKEN_SECRET` legacy settings are not used by V2. The chain and MUSD registry in new source are fixed to Mezo Testnet/canonical MUSD, not arbitrary network overrides.
+
+Only run these setup commands against a **development** database. The existing production database lacks a migration journal and needs its separate reviewed baseline plan.
+
 ```powershell
-# Development: apply the current schema directly
-pnpm.cmd db:push
-
-# Migration workflow: generate SQL, review it, then apply it
+# Create SQL, review it, then apply it to a suitable migration-based database:
 pnpm.cmd db:generate
 pnpm.cmd db:migrate
-```
 
-### 5. Start Development Server
-```powershell
+# Alternative for a dedicated development database:
+pnpm.cmd db:push
 pnpm.cmd dev
 ```
-Open [http://localhost:3000](http://localhost:3000) in your browser.
 
----
+`db:generate` creates SQL; it does not apply migrations. Database scripts load `.env.local`; check the target before running them. Do not blindly migrate the existing production tables or delete duplicate data to force a pass.
 
-## 🧪 Testing
+## Validation
 
-### Smart Contract Tests (Foundry)
-Execute the comprehensive test suite covering agreement creation, double-funding defense, milestone approval/rejection, reentrancy attacks, and mutual resolution invariants:
-```bash
-cd contracts
-forge test -vv
-```
-Phase B run on **2026-11-07**: **71 passed, 0 failed, 0 skipped**, including 3 fuzz tests with 256 runs each. A Phase A clean-clone build/test also passed. This is not an independent security audit.
-- `test_CreateAgreement_Success`
-- `test_CreateAgreement_Revert_ZeroAddress`
-- `test_CreateAgreement_Revert_ZeroMilestoneAmount`
-- `test_AcceptAgreement_Success`
-- `test_AcceptAgreement_Revert_NotProvider`
-- `test_FundAgreement_Success`
-- `test_FundAgreement_Revert_NotClient`
-- `test_FundAgreement_Revert_DoubleFunding`
-- `test_SubmitMilestone_Success`
-- `test_SubmitMilestone_Revert_NotProvider`
-- `test_ApproveMilestone_Success`
-- `test_ApproveMilestone_Revert_NotSubmitted`
-- `test_ApproveMilestone_Revert_DuplicateApproval`
-- `test_RejectAndResubmitMilestone_Success`
-- `test_CancelUnfundedAgreement_Success`
-- `test_CompleteAgreement_AllMilestonesApproved`
-- `test_MutualConsentResolution_Success`
-- `test_ReentrancyAttack_Reverts` (Validates `ReentrancyGuardReentrantCall()`)
-- `testFuzz_MilestoneAmountsInvariant` (256 fuzz runs verifying conservation of escrow value)
-
-### Web & Unit Tests (Vitest)
-Run the TypeScript unit tests:
-```powershell
-pnpm.cmd test
-```
-P0 run on **2026-11-07**: **125 passed, 0 failed**. Phase B Playwright desktop/mobile smoke: **2 passed**. Unit fixtures are Illustration, not live transaction evidence.
-- Validation schemas (Zod)
-- Cryptographic nonce & token hashing
-- UI component rendering and interaction
-
-### Lint & Typecheck
 ```powershell
 pnpm.cmd typecheck
 pnpm.cmd lint
@@ -192,65 +128,50 @@ pnpm.cmd test
 pnpm.cmd build
 pnpm.cmd exec playwright install chromium
 pnpm.cmd test:e2e
+pnpm.cmd check:client-secrets
+pnpm.cmd contracts:build
+pnpm.cmd contracts:test
+pnpm.cmd exec node scripts/run-foundry.mjs coverage --report lcov
 ```
 
----
+Recorded local November 7 checks: **125 web/unit tests**, **71 Foundry tests**, two desktop/mobile browser smoke tests and a **49-file client-secret scan** passed. Contract coverage was **238/239 lines**, **72/74 branches** and **27/27 functions**. These are dated local results, not an external audit, DB concurrency integration proof, or live payout/Telegram proof. Re-run before release.
 
-## 📦 Smart Contract Deployment to Mezo Testnet
+The same typecheck/lint/build, 125-test web suite, 71-test contract suite, two browser tests and 49-file scan were rerun and passed on **November 8** while preparing these drafts. Coverage figures above remain from the November 7 coverage run.
 
-To deploy `PactoraEscrow.sol` to Mezo Testnet using Foundry:
+OpenZeppelin and forge-std are committed under `contracts/lib/`; the Phase A clean-clone build/test passed. No `.gitmodules` or fresh `forge install` is required. Solidity source uses `^0.8.24`; Foundry pins compiler `0.8.37` and Paris EVM. The Windows runner finds `$HOME\.foundry\bin\forge.exe`.
+
+## Owner-Only Deployment
+
+The agent never broadcasts a contract or asks for a private key. The owner uses a locally encrypted keystore:
 
 ```powershell
-Set-Location contracts
-forge script script/DeployPactoraEscrow.s.sol:DeployPactoraEscrow `
-  --rpc-url https://rpc.test.mezo.org `
-  --chain-id 31611 `
-  --broadcast `
-  --legacy `
-  --account pactora-testnet
+pnpm.cmd exec node scripts/run-foundry.mjs script script/DeployPactoraEscrow.s.sol:DeployPactoraEscrow --rpc-url https://rpc.test.mezo.org --chain-id 31611 --account pactora-testnet --broadcast --legacy
 ```
 
-Only the owner runs a redeploy, using a locally encrypted Foundry keystore. Never share a private key. Set the returned address in `NEXT_PUBLIC_PACTORA_ESCROW_ADDRESS` locally and in Vercel, then redeploy the web app because this value is inlined at build time.
+The script checks chain `31611` before broadcast. After successful deployment, verify the public address/hash, update environment, apply the reviewed DB upgrade, then deploy the web app and reset/check the webhook. The public escrow address requires a new web build. See [the full safe order](docs/deployments.md#safe-release-order-pending-owner-action).
 
-OpenZeppelin and forge-std sources are committed under `contracts/lib/`; a fresh clone does not need `forge install` or a `.gitmodules` file. Run `forge build` and `forge test` from `contracts/`.
+## Known Limitations
 
----
+- **Testnet only, unaudited, no subjective dispute arbitration.** Timeout rules address silence, not proof of deliverable quality or bad-faith rejection.
+- Existing V1 is immutable, lacks timeouts and retains disclosed resolution/token-accounting issues. Do not route new funds there as if it were fixed.
+- V2 deployment, schema/config upgrade, real private-chat command checks, two-wallet demo, live bundle/log inspection and source verification are still pending.
+- The production read-only preflight found no duplicate links or non-normalized wallets, but all V2 schema additions and the migration journal were absent. Read-only inspection is not a migration pass.
+- Discovery covers registered metadata plus the first 50 on-chain IDs; complete indexing and automatic notification retry are not implemented. Delivery is best-effort and currently relies on confirmed app callbacks.
+- Public receipt history is bounded to recent blocks plus creation/closure anchors when older; RPC errors are not hidden with fabricated history.
+- Authentication is SIWE-style personal signing, **not EIP-4361**. The current signature flow targets EOA wallets, not a verified ERC-1271 smart-wallet flow.
+- Exact-transfer checks cannot eliminate later negative rebases or dishonest token balance reporting. Only reviewed tokens should be allowed.
+- Isolated PostgreSQL concurrency/rollback integration was not run because Docker was unavailable.
+- MEZO funding UI and the insufficient-MUSD funding step are P1/roadmap work, blocked until P0 live gates pass. No fake Mezo Passport or yield feature exists.
+- A deck outline and pitch script do not satisfy the required published deck and recorded video.
 
-## 🤖 Telegram Bot Configuration & Webhook Setup
+## Submission and Commitment
 
-1. **Create Bot:** Use `@BotFather` and configure the actual `TELEGRAM_BOT_USERNAME` and server-only `TELEGRAM_BOT_TOKEN`.
-2. **Set Webhook Secret:** Generate a random 32+ character hex string for `TELEGRAM_WEBHOOK_SECRET`.
-3. **Register Webhook:** Use `curl.exe` with secrets loaded from your local environment, never literal credentials in shell history. Register the production `/api/telegram/webhook` URL using Telegram's `setWebhook` method and inspect `getWebhookInfo` for errors.
-4. **Supported Commands:**
-   - `/start` — Welcome message and instructions
-    - `/start link_<token>` — Connect Telegram account to wallet address
-    - `/agreements` - Confirm on-chain agreement states and next actions
-    - `/balance` - Canonical MUSD and test BTC gas balance for the linked wallet
-    - `/pending` - Funded milestones needing review or delivery
-    - `/getmusd` - Mezo testnet faucet and swap/borrowing guide
-    - `/notifications` - Toggle notification preferences
-   - `/unlink` — Disconnect Telegram account
-   - `/help` — Protocol command guide
+The first commit is October 19, 2026, inside the announced Wave 1 build period. The current entry is intended for **Track 2**; Wave 2 qualification still needs owner confirmation. Future indexing, MEZO verification, independent review and consenting pilot targets are documented as plans, not traction.
 
----
+On November 8, [AKINDO's live Wave 2 data](https://api.akindo.io/public/wave-hacks/OVOO0gdrVU8379D10/waves) reported **November 13, 2026 at 05:30:06 UTC**. [Mezo's written schedule](https://mezo.org/blog/mezo-buildathon-is-underway/) says November 15. Plan against the earlier cutoff unless corrected; winner announcement is November 23, 2026.
 
-## 🔐 Security Architecture
+[Architecture](docs/architecture.md) | [Security findings and limits](docs/security.md) | [Deployment record](docs/deployments.md) | [Draft submission](docs/submission/akindo-form.md)
 
-- **Checks-Effects-Interactions:** State transitions are committed before external token operations.
-- **Safe Token Transfers:** SafeERC20 wrapper mitigates non-standard ERC-20 return values.
-- **Mutual Consent Settlement:** Invariant $\text{refund} + \text{release} == \text{escrowRemaining}$ protects accounting. It does not prevent funds being stuck when a party disappears.
-- **Single-Use Linking Tokens:** Expire in 15 minutes and use SHA-256 hash storage.
-- **Webhook Authentication:** Secret-token header verification, not HMAC. Constant-time verification is a required release gate.
-- **SIWE-Style Signed Nonce:** Custom wallet authentication message, **not EIP-4361/SIWE compliant**. Replay protection and session authorization are required release gates.
+## License
 
-This is testnet-only, unaudited software. V2 security fixes, seven-day review claims and agreed-deadline refunds are implemented locally; they require an owner-run redeploy and live verification before submission readiness can be claimed. V1 remains read-only and is not retroactively fixed.
-
-Bot discovery combines registered metadata with the first 50 on-chain agreement IDs, confirming parties and state through Mezo RPC. It labels incomplete discovery. A production event indexer and MEZO-token funding UI are roadmap items, not implemented integrations. Read-only bot commands link to the app and explorer but never invent a transaction hash.
-
-For full threat models and analysis, see [docs/security.md](docs/security.md).
-
----
-
-## 📄 License
-
-This project is licensed under the [Apache License 2.0](LICENSE).
+Apache-2.0. The repository `LICENSE` is authoritative; old live-footer text is not.
