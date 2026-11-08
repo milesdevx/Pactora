@@ -112,7 +112,7 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
 
   // Off-chain metadata state
   const session = useWalletSession();
-  const metadataQuery = useQuery({ queryKey: ["agreement-metadata", resolvedParams.id, address], enabled: parsedId.success && session.authenticated, retry: false, queryFn: () => jsonRequest<{ agreement: { title: string; description?: string; creationTxHash?: string; milestoneDetails: { title: string; description?: string }[] } }>(`/api/agreements/${resolvedParams.id}`) });
+  const metadataQuery = useQuery({ queryKey: ["agreement-metadata", resolvedParams.id, address], enabled: parsedId.success && session.authenticated, retry: false, queryFn: () => jsonRequest<{ agreement: { title: string; description?: string; milestoneDetails: { title: string; description?: string }[] } }>(`/api/agreements/${resolvedParams.id}`) });
   const metadata = metadataQuery.data?.agreement;
   const evidenceQuery = useQuery({ queryKey: ["agreement-evidence", resolvedParams.id, address], enabled: parsedId.success && session.authenticated, retry: false, queryFn: () => jsonRequest<{ evidence: { milestoneIndex: number; kind: string; text: string; contentHash: string; txHash: string }[] }>(`/api/agreements/${resolvedParams.id}/evidence`) });
   const [submissionNotes, setSubmissionNotes] = useState<{ [key: number]: string }>({});
@@ -328,85 +328,9 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
     musdAllowance !== undefined &&
     musdAllowance < contractAgreement.totalAmount;
 
-  const isZeroAddress = (addr?: string) => !addr || /^0x0{40}$/i.test(addr);
-  const notFoundOnChain = Boolean(
-    contractAgreement &&
-    (isZeroAddress(contractAgreement.client) || contractAgreement.id === 0n)
-  );
-
   if (!parsedId.success) return <div className="mx-auto max-w-4xl p-8"><h1 className="text-2xl font-semibold">Invalid agreement ID</h1><p className="mt-3">Use a positive numeric agreement ID.</p></div>;
   if (isContractLoading) return <div className="mx-auto max-w-4xl p-8"><h1 className="text-2xl font-semibold">Loading agreement</h1><p className="mt-3">Reading confirmed Mezo Testnet state.</p></div>;
   if (contractReadError || (!isContractLoading && !contractAgreement)) return <div className="mx-auto max-w-4xl p-8"><h1 className="text-2xl font-semibold">Agreement unavailable</h1><p className="mt-3">The agreement was not found or Mezo Testnet could not be read. No amounts or success state are being fabricated.</p><Button className="mt-4" onClick={() => { void refetchAgreement(); }}>Retry chain read</Button></div>;
-
-  if (notFoundOnChain) {
-    const creationTx = metadata?.creationTxHash;
-    return (
-      <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8 space-y-6">
-        <TestnetGuard />
-        <Link
-          href="/dashboard"
-          className="text-xs text-slate-400 hover:text-white flex items-center gap-1 transition-colors"
-        >
-          <span>← Back to Dashboard</span>
-        </Link>
-        <Card className="border-red-500/30 bg-red-950/20 shadow-2xl">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-red-400" />
-              <CardTitle className="text-xl text-red-200">
-                Not found on-chain for this contract address
-              </CardTitle>
-            </div>
-            <CardDescription className="text-slate-300">
-              Agreement #{resolvedParams.id} does not exist in the configured escrow contract on Mezo Testnet (Chain ID 31611). The contract returned an empty struct (<code className="text-red-300">client == address(0)</code>).
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4 text-sm">
-            <div className="rounded-xl bg-slate-900/80 p-4 border border-slate-800 space-y-2">
-              <span className="text-xs text-slate-400 block">Configured Escrow Contract</span>
-              <a
-                href={`https://explorer.test.mezo.org/address/${CONTRACT_ADDRESSES.PACTORA_ESCROW}`}
-                target="_blank"
-                rel="noreferrer"
-                className="font-mono text-xs text-teal-300 underline break-all inline-flex items-center gap-1"
-              >
-                {CONTRACT_ADDRESSES.PACTORA_ESCROW}
-                <ExternalLink className="h-3 w-3" />
-              </a>
-            </div>
-
-            {creationTx ? (
-              <div className="rounded-xl bg-slate-900/80 p-4 border border-slate-800 space-y-2">
-                <span className="text-xs text-slate-400 block">Creation Transaction</span>
-                <a
-                  href={`https://explorer.test.mezo.org/tx/${creationTx}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-mono text-xs text-teal-300 underline break-all inline-flex items-center gap-1"
-                >
-                  {creationTx}
-                  <ExternalLink className="h-3 w-3" />
-                </a>
-                <p className="text-xs text-slate-400 mt-1">
-                  Inspect this transaction on the explorer to confirm the on-chain agreement ID from the AgreementCreated event logs.
-                </p>
-              </div>
-            ) : null}
-
-            <div className="pt-2 flex gap-3">
-              <Button onClick={() => { void refetchAgreement(); }} variant="outline" size="sm">
-                Retry chain read
-              </Button>
-              <Link href="/agreements/create">
-                <Button size="sm">Create New Agreement</Button>
-              </Link>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
   if (contractAgreement && contractAgreement.token.toLowerCase() !== CONTRACT_ADDRESSES.MUSD.toLowerCase()) return <div className="mx-auto max-w-4xl p-8"><h1 className="text-2xl font-semibold">Unsupported escrow token</h1><p className="mt-3 break-all">This agreement uses {contractAgreement.token}. The current interface supports canonical MUSD only and will not label this token as MUSD.</p></div>;
 
   return (
@@ -964,14 +888,9 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
                 );
               })}
             </div>
-          ) : isMilestonesLoading ? (
-            <div className="h-32 flex items-center justify-center text-slate-400 text-xs gap-2">
-              <Clock className="h-4 w-4 animate-spin text-teal-400" />
-              Loading milestone state from blockchain...
-            </div>
           ) : (
-            <div className="h-32 flex items-center justify-center text-slate-400 text-xs">
-              No milestones recorded on-chain for this agreement.
+            <div className="h-32 flex items-center justify-center text-slate-500 text-xs">
+              Loading milestone state from blockchain...
             </div>
           )}
         </CardContent>

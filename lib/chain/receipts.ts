@@ -10,15 +10,11 @@ export async function readEscrowAgreement(id: number, address = getEscrowAddress
   const abi = address === LEGACY_ESCROW_ADDRESS ? LEGACY_ESCROW_ABI : PACTORA_ESCROW_ABI;
   const blockNumber = await mezoPublicClient.getBlockNumber({ cacheTime: 0 });
   const count = await mezoPublicClient.readContract({ address, abi, functionName: "getAgreementCount", blockNumber });
-  if (BigInt(id) > count) throw new ApiError(404, "Not found on-chain for this contract address", "AGREEMENT_NOT_FOUND");
+  if (BigInt(id) > count) throw new ApiError(404, "Agreement does not exist on Mezo Testnet", "AGREEMENT_NOT_FOUND");
   const [agreement, milestones] = await Promise.all([
     mezoPublicClient.readContract({ address, abi, functionName: "getAgreement", args: [BigInt(id)], blockNumber }),
     mezoPublicClient.readContract({ address, abi, functionName: "getMilestones", args: [BigInt(id)], blockNumber }),
   ]);
-  const isZeroAddress = (addr?: string) => !addr || /^0x0{40}$/i.test(addr);
-  if (agreement.id === 0n || isZeroAddress(agreement.client)) {
-    throw new ApiError(404, "Not found on-chain for this contract address", "AGREEMENT_NOT_FOUND");
-  }
   return { agreement, milestones, blockNumber, count, address, legacy: address === LEGACY_ESCROW_ADDRESS };
 }
 

@@ -23,12 +23,7 @@ export function apiError(error: unknown): NextResponse {
 }
 
 export function getAppUrl(): string {
-  const configured =
-    process.env.APP_URL ||
-    (process.env.VERCEL_PROJECT_PRODUCTION_URL
-      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-      : undefined) ||
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined);
+  const configured = process.env.APP_URL;
   if (!configured) throw new ApiError(503, "Application URL is not configured", "CONFIGURATION_REQUIRED");
   let url: URL;
   try { url = new URL(configured); } catch { throw new ApiError(503, "Application URL is invalid", "CONFIGURATION_REQUIRED"); }
@@ -44,11 +39,7 @@ export function getAppUrl(): string {
 export function requireSameOrigin(req: NextRequest): string {
   const origin = req.headers.get("origin");
   const expected = getAppUrl();
-  const host = req.headers.get("host");
-  const allowed =
-    origin === expected ||
-    (process.env.NODE_ENV !== "production" && origin === req.nextUrl.origin) ||
-    (Boolean(origin && host) && origin === `https://${host}`);
+  const allowed = origin === expected || (process.env.NODE_ENV !== "production" && origin === req.nextUrl.origin);
   if (!allowed) throw new ApiError(403, "Request origin is not allowed", "ORIGIN_NOT_ALLOWED");
   return origin!;
 }

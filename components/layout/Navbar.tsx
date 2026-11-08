@@ -9,7 +9,6 @@ import { mezoTestnet } from "@/lib/chain/config";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { AddressChip } from "@/components/ui/AddressChip";
-import { EscrowBootCheck } from "@/components/wallet/EscrowBootCheck";
 import {
   Wallet,
   CheckCircle2,
@@ -58,9 +57,6 @@ export function Navbar() {
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-slate-800/80 bg-[#080d1a]/90 backdrop-blur-md">
-      {/* Escrow Contract Startup Boot Check */}
-      <EscrowBootCheck />
-
       {/* Wrong Network Animated Banner */}
       <AnimatePresence>
         {isWrongNetwork && (

@@ -23,13 +23,12 @@ export async function readChainAgreement(id: number) {
   const address = getEscrowAddress();
   const blockNumber = await mezoPublicClient.getBlockNumber({ cacheTime: 0 });
   const count = await mezoPublicClient.readContract({ address, abi: PACTORA_ESCROW_ABI, functionName: "getAgreementCount", blockNumber });
-  if (BigInt(id) > count) throw new ApiError(404, "Not found on-chain for this contract address", "AGREEMENT_NOT_FOUND");
+  if (BigInt(id) > count) throw new ApiError(404, "Agreement does not exist on Mezo Testnet", "AGREEMENT_NOT_FOUND");
   const [agreement, milestones] = await Promise.all([
     mezoPublicClient.readContract({ address, abi: PACTORA_ESCROW_ABI, functionName: "getAgreement", args: [BigInt(id)], blockNumber }),
     mezoPublicClient.readContract({ address, abi: PACTORA_ESCROW_ABI, functionName: "getMilestones", args: [BigInt(id)], blockNumber }),
   ]);
-  const isZeroAddress = (addr?: string) => !addr || /^0x0{40}$/i.test(addr);
-  if (agreement.id === 0n || isZeroAddress(agreement.client)) throw new ApiError(404, "Not found on-chain for this contract address", "AGREEMENT_NOT_FOUND");
+  if (agreement.id === 0n) throw new ApiError(404, "Agreement does not exist on Mezo Testnet", "AGREEMENT_NOT_FOUND");
   return { agreement, milestones, blockNumber };
 }
 
@@ -66,89 +65,4 @@ export async function readConfirmedReceipt(txHash: `0x${string}`) {
   const logs = parseEventLogs({ abi: PACTORA_ESCROW_ABI, logs: receipt.logs.filter((log) => log.address.toLowerCase() === getEscrowAddress()), strict: true });
   if (!logs.length) throw new ApiError(400, "No Pactora escrow event in transaction", "INVALID_TRANSACTION");
   return { receipt, logs };
-}
-
-export type EscrowDeploymentStatus = {
-  ok: boolean;
-  address: string;
-  hasCode: boolean;
-  viewFunctionResponds: boolean;
-  agreementCount: number | null;
-  version: number | null;
-  isLegacy: boolean;
-  error?: string;
-};
-
-export async function checkEscrowDeployment(): Promise<EscrowDeploymentStatus> {
-  const address = getEscrowAddress();
-  try {
-    await requireTestnet();
-    const bytecode = await mezoPublicClient.getBytecode({ address });
-    if (!bytecode || bytecode === "0x") {
-      return {
-        ok: false,
-        address,
-        hasCode: false,
-        viewFunctionResponds: false,
-        agreementCount: null,
-        version: null,
-        isLegacy: false,
-        error: `Escrow address ${address} has no deployed bytecode on Mezo Testnet (Chain ID 31611).`,
-      };
-    }
-
-    let agreementCount: number | null = null;
-    try {
-      const count = await mezoPublicClient.readContract({
-        address,
-        abi: PACTORA_ESCROW_ABI,
-        functionName: "getAgreementCount",
-      });
-      agreementCount = Number(count);
-    } catch {
-      return {
-        ok: false,
-        address,
-        hasCode: true,
-        viewFunctionResponds: false,
-        agreementCount: null,
-        version: null,
-        isLegacy: false,
-        error: `Contract at ${address} does not implement the expected getAgreementCount() view function.`,
-      };
-    }
-
-    let version: number | null = null;
-    try {
-      const ver = await mezoPublicClient.readContract({
-        address,
-        abi: PACTORA_ESCROW_ABI,
-        functionName: "VERSION",
-      });
-      version = Number(ver);
-    } catch {
-      version = 1; // Legacy V1 contract has no VERSION() view function
-    }
-
-    return {
-      ok: true,
-      address,
-      hasCode: true,
-      viewFunctionResponds: true,
-      agreementCount,
-      version,
-      isLegacy: version !== 2,
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      address,
-      hasCode: false,
-      viewFunctionResponds: false,
-      agreementCount: null,
-      version: null,
-      isLegacy: false,
-      error: error instanceof Error ? error.message : "Escrow verification failed.",
-    };
-  }
 }

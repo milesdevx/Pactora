@@ -5,9 +5,6 @@ import { apiError, ApiError } from "@/lib/security/api";
 import { getEscrowAddress } from "@/lib/chain/server";
 import { LEGACY_ESCROW_ADDRESS } from "@/lib/chain/abi/LegacyPactoraEscrow";
 import { readPublicReceipt } from "@/lib/chain/receipts";
-import { db } from "@/lib/db";
-import { agreementMetadata } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 const Query = z.object({ escrow: WalletAddressSchema.optional() }).strict();
@@ -17,31 +14,6 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     const id = AgreementIdSchema.parse((await context.params).id);
     const { escrow = getEscrowAddress() } = Query.parse(Object.fromEntries(req.nextUrl.searchParams));
     if (escrow !== getEscrowAddress() && escrow !== LEGACY_ESCROW_ADDRESS) throw new ApiError(400, "Unsupported Pactora escrow address", "UNSUPPORTED_ESCROW");
-    try {
-      return NextResponse.json(await readPublicReceipt(id, escrow), { headers: { "Cache-Control": "public, max-age=15, s-maxage=15" } });
-    } catch (readError) {
-      if (readError instanceof ApiError && readError.status === 404) {
-        let creationTxHash: string | undefined;
-        try {
-          const [meta] = await db
-            .select({ creationTxHash: agreementMetadata.creationTxHash })
-            .from(agreementMetadata)
-            .where(eq(agreementMetadata.onChainId, id))
-            .limit(1);
-          creationTxHash = meta?.creationTxHash || undefined;
-        } catch { /* DB read optional */ }
-        return NextResponse.json(
-          {
-            error: "Not found on-chain for this contract address",
-            code: "AGREEMENT_NOT_FOUND",
-            id,
-            escrow,
-            creationTxHash,
-          },
-          { status: 404, headers: { "Cache-Control": "no-store" } }
-        );
-      }
-      throw readError;
-    }
+    return NextResponse.json(await readPublicReceipt(id, escrow), { headers: { "Cache-Control": "public, max-age=15, s-maxage=15" } });
   } catch (error) { return apiError(error); }
 }

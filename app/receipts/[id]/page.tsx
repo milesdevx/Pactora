@@ -10,17 +10,13 @@ import { jsonRequest } from "@/components/wallet/WalletSessionProvider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, ExternalLink } from "lucide-react";
 
 type Receipt = {
   escrow: string; legacy: boolean; historyComplete: boolean; blockNumber: string;
   agreement: { id: number; client: string; provider: string; token: string; symbol: string; state: string; termsHash: string; totalAmount: string; fundedAmount: string; releasedAmount: string; refundedAmount: string; remainingAmount: string; createdAt: string; fundedAt: string; completedAt: string };
   milestones: { index: number; amount: string; state: string; submissionHash: string }[];
   transactions: { hash: string; event: string; blockNumber: string }[];
-  creationTxHash?: string;
 };
-
-const isZeroAddress = (addr?: string) => !addr || /^0x0{40}$/i.test(addr);
 
 function date(seconds: string) {
   if (seconds === "0") return "Not recorded";
@@ -32,7 +28,6 @@ function ReceiptContent({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const query = useSearchParams();
   const escrow = query.get("escrow") || CONTRACT_ADDRESSES.PACTORA_ESCROW;
-  const queryTx = query.get("tx");
   const parsed = AgreementIdSchema.safeParse(id);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
@@ -40,80 +35,16 @@ function ReceiptContent({ params }: { params: Promise<{ id: string }> }) {
   const data = receipt.data;
   if (!parsed.success) return <div className="mx-auto max-w-4xl p-8"><h1 className="text-2xl font-semibold">Invalid receipt ID</h1><p className="mt-3">Use a positive numeric agreement ID.</p></div>;
 
-  const isNotFound = receipt.error?.message?.toLowerCase().includes("not found") ||
-    receipt.error?.message?.toLowerCase().includes("does not exist") ||
-    Boolean(data && isZeroAddress(data.agreement.client));
-
-  const creationTx = queryTx || data?.creationTxHash;
-
   return <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 space-y-6">
-    <Link href="/dashboard" className="text-sm text-slate-300 hover:text-white">← Back to Pactora</Link>
+    <Link href="/dashboard" className="text-sm text-slate-300 hover:text-white">Back to Pactora</Link>
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div><h1 className="text-2xl sm:text-3xl font-semibold">Agreement #{id} Receipt</h1><p className="mt-2 text-sm text-slate-300">Public on-chain evidence from Mezo Testnet, chain 31611.</p></div>
       <div className="flex gap-2"><Button variant="outline" onClick={() => { void navigator.clipboard.writeText(window.location.href).then(() => { setCopied(true); setCopyError(null); }).catch(() => setCopyError("Clipboard access is unavailable.")); }}>{copied ? "Link copied" : "Copy receipt link"}</Button><Button variant="outline" onClick={() => window.print()}>Print receipt</Button></div>
     </div>
     {copyError && <p role="alert">{copyError}</p>}
     {receipt.isPending && <p role="status" className="text-slate-300">Reading agreement and confirmed transaction logs. No placeholder balances are shown.</p>}
-    {isNotFound && (
-      <Card className="border-red-500/30 bg-red-950/20 shadow-2xl">
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="h-5 w-5 text-red-400" />
-            <CardTitle className="text-xl text-red-200">
-              Not found on-chain for this contract address
-            </CardTitle>
-          </div>
-          <CardDescription className="text-slate-300">
-            Agreement #{id} does not exist in the escrow contract on Mezo Testnet (Chain ID 31611). The contract returned an empty struct (<code className="text-red-300">client == address(0)</code>).
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4 text-sm">
-          <div className="rounded-xl bg-slate-900/80 p-4 border border-slate-800 space-y-2">
-            <span className="text-xs text-slate-400 block">Checked Escrow Contract</span>
-            <a
-              href={`https://explorer.test.mezo.org/address/${escrow}`}
-              target="_blank"
-              rel="noreferrer"
-              className="font-mono text-xs text-teal-300 underline break-all inline-flex items-center gap-1"
-            >
-              {escrow}
-              <ExternalLink className="h-3 w-3" />
-            </a>
-          </div>
-
-          {creationTx ? (
-            <div className="rounded-xl bg-slate-900/80 p-4 border border-slate-800 space-y-2">
-              <span className="text-xs text-slate-400 block">Creation Transaction</span>
-              <a
-                href={`https://explorer.test.mezo.org/tx/${creationTx}`}
-                target="_blank"
-                rel="noreferrer"
-                className="font-mono text-xs text-teal-300 underline break-all inline-flex items-center gap-1"
-              >
-                {creationTx}
-                <ExternalLink className="h-3 w-3" />
-              </a>
-              <p className="text-xs text-slate-400 mt-1">
-                Inspect this transaction on the explorer to confirm the true on-chain agreement ID from the AgreementCreated event logs.
-              </p>
-            </div>
-          ) : null}
-
-          <div className="pt-2 flex gap-3">
-            <Button onClick={() => { void receipt.refetch(); }} variant="outline" size="sm">
-              Retry chain read
-            </Button>
-            <Link href="/dashboard">
-              <Button size="sm">Return to Dashboard</Button>
-            </Link>
-          </div>
-        </CardContent>
-      </Card>
-    )}
-    {!isNotFound && receipt.error && (
-      <Card><CardHeader><CardTitle>Receipt unavailable</CardTitle><CardDescription>{receipt.error.message}</CardDescription></CardHeader><CardContent><Button onClick={() => { void receipt.refetch(); }}>Retry chain read</Button></CardContent></Card>
-    )}
-    {!isNotFound && data && !isZeroAddress(data.agreement.client) && <>
+    {receipt.error && <Card><CardHeader><CardTitle>Receipt unavailable</CardTitle><CardDescription>{receipt.error.message}</CardDescription></CardHeader><CardContent><Button onClick={() => { void receipt.refetch(); }}>Retry chain read</Button></CardContent></Card>}
+    {data && <>
       <Card className="border-slate-800 bg-[#0f172a]"><CardHeader><div className="flex flex-wrap items-center gap-3"><CardTitle>Confirmed Agreement State</CardTitle><Badge>{data.agreement.state}</Badge>{data.legacy && <Badge variant="secondary">Legacy, read-only</Badge>}</div><CardDescription>Snapshot at Mezo Testnet block {data.blockNumber}. This is not an audit or a judgment of deliverable quality.</CardDescription></CardHeader><CardContent className="space-y-5">
         {data.legacy && <p className="text-sm text-amber-200">V1 has no timeout policy and retains the disclosed resolution/token-accounting issues. New agreements must use V2; this page only preserves historical verification.</p>}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">{[["Agreement total", data.agreement.totalAmount], ["Actually funded", data.agreement.fundedAmount], ["Currently locked", data.agreement.remainingAmount], ["Released", data.agreement.releasedAmount], ["Refunded", data.agreement.refundedAmount]].map(([label, amount]) => <div key={label} className="rounded-lg bg-slate-900 p-4"><p className="text-sm text-slate-300">{label}</p><p className="mt-2 break-all text-xl font-semibold tabular-nums">{amount} {data.agreement.symbol}</p></div>)}</div>
