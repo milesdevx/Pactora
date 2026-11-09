@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { jsonRequest } from "@/components/wallet/WalletSessionProvider";
 import { CONTRACT_ADDRESSES } from "@/lib/chain/config";
 
-type HealthResponse = { status: "ok"; escrow: { address: string; version: number; agreementCount: string; defaultToken: string; allowlistEnforced: boolean } };
+type HealthResponse = { status: "ok"; escrow: { address: string; version: number; agreementCount: string; defaultToken: string; allowlistEnforced: boolean; defaultTokenAllowed: boolean } };
 
 export function EscrowConfigurationStatus() {
   const health = useQuery({

@@ -12,7 +12,7 @@ export async function GET() {
       app: "Pactora",
       network: "Mezo Testnet",
       chainId: 31611,
-      escrow: { address: escrow.address, version: Number(escrow.version), agreementCount: escrow.agreementCount.toString(), defaultToken: escrow.defaultToken, allowlistEnforced: escrow.enforceTokenAllowlist },
+      escrow: { address: escrow.address, version: Number(escrow.version), agreementCount: escrow.agreementCount.toString(), defaultToken: escrow.defaultToken, allowlistEnforced: escrow.enforceTokenAllowlist, defaultTokenAllowed: escrow.defaultTokenAllowed },
       timestamp: new Date().toISOString(),
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

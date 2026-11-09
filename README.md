@@ -1,15 +1,16 @@
 # Pactora: MUSD Milestone Escrow on Mezo
 
-[![V1 Demo](https://img.shields.io/badge/V1_demo-live-orange)](https://pactora-tan.vercel.app)
+[![Production Cutover](https://img.shields.io/badge/V2_cutover-pending-orange)](https://pactora-tan.vercel.app)
 [![Mezo Testnet](https://img.shields.io/badge/Mezo_Testnet-31611-blue)](https://explorer.test.mezo.org)
 [![CI](https://github.com/milesdevx/Pactora/actions/workflows/ci.yml/badge.svg)](https://github.com/milesdevx/Pactora/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue)](LICENSE)
 
 Pactora coordinates MUSD milestone payments between freelancers and clients on Mezo Testnet. Wallets authorize agreement acceptance, funding, delivery and payouts; Telegram helps participants understand balances and the next action.
 
-**Submission status, checked November 8, 2026:** the existing **V1 demo is live**, but the hardened **V2 contract and app are not deployed**. Local tests are not live payment or Telegram-delivery proof. Do not fund the legacy address as if it had been upgraded. The submission pack is a draft, not a finished deck/video or verified release.
+**Release status, checked November 9, 2026:** the hardened **V2 contract is deployed and exactly source-verified**, while production database/application cutover and the two-wallet live flow remain pending. The current public bundle must not be treated as V2 until the deployment record confirms the web release.
 
-- Existing live V1: https://pactora-tan.vercel.app
+- Production alias: https://pactora-tan.vercel.app
+- Verified V2 escrow: `0x907AAB5A6d1710c477B9C1Da3c3b60b1324A060A`
 - Public repository: https://github.com/milesdevx/Pactora
 - Actual bot: https://t.me/PactoraAlertsBot
 - [Deployment evidence and pending release gates](docs/deployments.md)
@@ -32,7 +33,7 @@ The public repository is currently behind the locally committed fixes. CI is con
 - Exact bigint monetary formatting, explicit testnet/account writes, money-action confirmation, real receipt-derived agreement IDs and evidence text verified against chain hashes.
 - `/balance`, `/agreements`, `/pending`, `/getmusd`, `/help`, `/notifications` and `/unlink` in the new bot source.
 
-These features are locally implemented/tested. The current public V1 deployment must not be represented as possessing the new guarantees.
+These features are implemented and tested in the V2 source. The production application must not be represented as cut over until its inlined address and live behavior are verified.
 
 ## Network and Deployment
 
@@ -45,13 +46,14 @@ These features are locally implemented/tested. The current public V1 deployment 
 | Explorer | https://explorer.test.mezo.org |
 | Canonical MUSD | `0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503`, 18 decimals |
 | Existing legacy V1 escrow | `0x1Da50726E11bf828358f6b840900c0a731B2b40F` |
-| Verified V2 address / deployment hash | **Pending owner redeploy** |
+| Verified V2 escrow | `0x907AAB5A6d1710c477B9C1Da3c3b60b1324A060A` |
+| V2 deployment hash | `0x9398e478826ed8cc6abacb386b1040ccf21b5a4517f652ad2f29f76fe6a8aa98` |
 
 [Official Mezo network guide](https://mezo.org/docs/developers/getting-started/) and [MUSD reference](https://mezo.org/docs/developers/getting-started/musd-payments-x402/#mezo-x402-reference).
 
 ## Try It
 
-The existing live site's [help page](https://pactora-tan.vercel.app/help) is available for read-only network information. The safe flow below is for the **verified V2 release after the deployment gates pass**, not a promise that today's V1 is upgraded.
+The production site's [help page](https://pactora-tan.vercel.app/help) is available for read-only network information. Use the transaction flow only after the deployment record confirms the V2 web cutover.
 
 1. Select Mezo Testnet `31611`. Obtain test BTC at https://faucet.test.mezo.org/ using your wallet address and CAPTCHA.
 2. Open https://testnet.mezo.org and swap test BTC for MUSD or use BTC-backed MUSD borrowing. The faucet offers BTC/MEZO, not direct MUSD; review any borrowing minimum/terms. Retain test BTC for gas.

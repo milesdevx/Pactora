@@ -20,6 +20,7 @@ describe("escrow health check", () => {
       if (functionName === "getAgreementCount") return Promise.resolve(3n);
       if (functionName === "defaultToken") return Promise.resolve(boundary.musd);
       if (functionName === "enforceTokenAllowlist") return Promise.resolve(true);
+      if (functionName === "isTokenAllowed") return Promise.resolve(true);
       throw new Error("Unexpected health view");
     });
   });
@@ -29,7 +30,7 @@ describe("escrow health check", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     const body = await response.json();
-    expect(body.escrow).toEqual({ address: boundary.escrow, version: 2, agreementCount: "3", defaultToken: boundary.musd, allowlistEnforced: true });
+    expect(body.escrow).toEqual({ address: boundary.escrow, version: 2, agreementCount: "3", defaultToken: boundary.musd, allowlistEnforced: true, defaultTokenAllowed: true });
   });
 
   it("fails when the configured address has no code", async () => {
@@ -40,11 +41,26 @@ describe("escrow health check", () => {
     expect(boundary.rpc.readContract).not.toHaveBeenCalled();
   });
 
+  it("fails when canonical MUSD is not currently allowed", async () => {
+    boundary.rpc.readContract.mockImplementation(({ functionName }: { functionName: string }) => {
+      if (functionName === "VERSION") return Promise.resolve(2n);
+      if (functionName === "getAgreementCount") return Promise.resolve(3n);
+      if (functionName === "defaultToken") return Promise.resolve(boundary.musd);
+      if (functionName === "enforceTokenAllowlist") return Promise.resolve(true);
+      if (functionName === "isTokenAllowed") return Promise.resolve(false);
+      throw new Error("Unexpected health view");
+    });
+    const response = await GET();
+    expect(response.status).toBe(503);
+    expect((await response.json()).code).toBe("ESCROW_TOKEN_NOT_ALLOWED");
+  });
+
   it("fails safely when VERSION is wrong or a known view reverts", async () => {
     boundary.rpc.readContract.mockImplementation(({ functionName }: { functionName: string }) => {
       if (functionName === "VERSION") return Promise.resolve(1n);
       if (functionName === "defaultToken") return Promise.resolve(boundary.musd);
       if (functionName === "enforceTokenAllowlist") return Promise.resolve(true);
+      if (functionName === "isTokenAllowed") return Promise.resolve(true);
       return Promise.resolve(3n);
     });
     const wrongVersion = await GET();

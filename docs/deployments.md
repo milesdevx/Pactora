@@ -1,84 +1,73 @@
-# Deployment Record: Draft, V2 Not Deployed
+# Deployment Record: Pactora V2
 
-Checked **2026-11-08**. The owner confirmed that V2 has not been redeployed and authorized read-only preflight plus draft submission materials. This record is not a claim of V2 production readiness.
+Checked **2026-11-09**. Pactora V2 is deployed on Mezo Testnet. Production application and database cutover are recorded separately and must not be inferred from the contract deployment.
 
-## Verified Existing Deployment
+## Current V2 Contract
 
-| Field | Observed value |
+| Field | Verified value |
 | --- | --- |
-| Live web URL | https://pactora-tan.vercel.app |
-| Vercel deployment URL | https://pactora-bm113yvkc-mfaver.vercel.app |
-| Vercel production creation date | 2026-10-24, from `vercel inspect` |
-| Chain | Mezo Testnet, `31611` |
+| Chain | Mezo Testnet, `31611` (`0x7b7b`) |
 | RPC | https://rpc.test.mezo.org |
-| Configured legacy escrow | `0x1Da50726E11bf828358f6b840900c0a731B2b40F` |
-| Escrow explorer | https://explorer.test.mezo.org/address/0x1Da50726E11bf828358f6b840900c0a731B2b40F |
-| Canonical MUSD | `0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503`, 18 decimals |
-| Token explorer | https://explorer.test.mezo.org/token/0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503 |
-| Bot | https://t.me/PactoraAlertsBot |
-| Webhook URL | https://pactora-tan.vercel.app/api/telegram/webhook |
-| Contract deployment transaction hash/date | **Unverified, not provided**. Historical RPC lookup did not produce a verified matching creation receipt. |
-| V2 escrow / deployment transaction | **Not deployed / unavailable**. Do not substitute the legacy address. |
+| Escrow | `0x907AAB5A6d1710c477B9C1Da3c3b60b1324A060A` |
+| Escrow explorer | https://explorer.test.mezo.org/address/0x907AAB5A6d1710c477B9C1Da3c3b60b1324A060A |
+| Deployment transaction | `0x9398e478826ed8cc6abacb386b1040ccf21b5a4517f652ad2f29f76fe6a8aa98` |
+| Transaction explorer | https://explorer.test.mezo.org/tx/0x9398e478826ed8cc6abacb386b1040ccf21b5a4517f652ad2f29f76fe6a8aa98 |
+| Block | `16672530` (`0xfe6712`) |
+| Block timestamp | `2026-11-09T12:23:56.000Z` |
+| Deployer / owner | `0xb44ecBC98b74536fBe085eE9085aebC26e8Cb5b6` |
+| Canonical MUSD | `0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503` |
+| Contract version | `2` |
+| Token allowlist | Enforced; canonical MUSD allowed |
+| Initial agreement count / next ID | `0` / `1` |
+| Source verification | Sourcify `exact_match` |
+| Verification job | https://sourcify.dev/server/verify-ui/jobs/43655119-6c0a-44f0-a1e5-00d613d0689b |
 
-`VERSION()` reverted on the configured legacy escrow. `/api/auth/session` returned HTTP `404`; the hardened application is not deployed. No owner key, keystore password, or server secret was printed or requested.
+### Checks Actually Run
 
-## Checks Actually Run
-
-| Check | Result | Scope |
+| Check | Result | Evidence |
 | --- | --- | --- |
-| Live URL HTTP status | PASS: `200` | Existing V1 only |
-| Wrong-secret webhook POST | PASS: `401` | Rejected before any real update; existing V1 only |
-| Telegram `getMe` | PASS: `PactoraAlertsBot`, bot flag true | Actual bot identity |
-| Telegram `getWebhookInfo` | PASS: production URL, pending updates `0`, no reported last error | Configuration only, not proof of new commands |
-| RPC chain ID | PASS: `31611` | Actual Mezo Testnet |
-| Configured escrow `VERSION()` | V2 gate unmet: reverted | Legacy deployment |
-| Hardened session endpoint | V2 gate unmet: `404` | Existing web deployment |
-| Live V1 help screenshots | PASS: HTTP `200`, visible main content, inspected desktop/mobile images | No wallet injection or simulated transaction |
-| Historical deployment lookup | NOT VERIFIED | One candidate receipt was missing; another attempt returned HTTP `522` with an HTML response |
-| V2 source verification | NOT RUN | No V2 address exists yet |
-| Explorer v2 address API lookup | FAILED: `404` in the preceding phase | This is not a successful source verification |
-| New bot commands, signed relinking, two-wallet payment demo | NOT RUN live | Local tests/RPC formatting are not Telegram or payment evidence |
-| Production logs and live V2 secret-bundle scan | NOT RUN | Only local bundle scanning passed previously |
+| `eth_getCode` | PASS | Non-empty V2 runtime at the escrow address |
+| Deployment transaction in stated block | PASS | `eth_getBlockByNumber(0xfe6712, true)` contains the exact hash, deployer, nonce `0`, constructor MUSD and allowlist `true` |
+| `eth_getTransactionReceipt` | FAIL: RPC returned `null` on three attempts | The required RPC also returned `null` for `eth_getTransactionByHash`; `eth_getBlockReceipts` is unsupported. This check is not labelled PASS. Persistent runtime code proves creation execution completed, but does not repair the RPC receipt index. |
+| Contract address | PASS | The nonce-zero creation transaction and persisted runtime resolve to the recorded address |
+| `VERSION()` | PASS: `2` | Direct `eth_call` |
+| `owner()` | PASS: deployer address | Direct `eth_call` |
+| `defaultToken()` | PASS: canonical MUSD | Direct `eth_call` |
+| `enforceTokenAllowlist()` | PASS: `true` | Direct `eth_call` |
+| `isTokenAllowed(MUSD)` | PASS: `true` | Direct `eth_call` |
+| `getAgreementCount()` / `nextAgreementId()` | PASS: `0` / `1` | Direct `eth_call` |
+| Source verification | PASS: Sourcify `exact_match` | Foundry verification job linked above |
 
-No `setWebhook`, contract broadcast, production database mutation, environment update, or production web deploy was run during this draft phase.
+## Legacy V1 Contract
 
-Local November 8 rerun: typecheck, lint, build, 125 web/unit tests, 71 Foundry tests, two browser smoke tests and the 49-file client-secret scan passed. These are not production V2 results.
+The previous contract remains immutable and available for read-only historical receipts:
 
-## Read-Only Production Database Preflight
+- Address: `0x1Da50726E11bf828358f6b840900c0a731B2b40F`
+- Explorer: https://explorer.test.mezo.org/address/0x1Da50726E11bf828358f6b840900c0a731B2b40F
+- Deployment transaction: `0xe234e5a2a79682feeb221cf21a7126852e432497c2f6a10b380826e6a4566bb9`
+- Agreement count: `3`; known IDs are `1`, `2`, and `3`
+- `VERSION()` is absent. It must not be configured as the V2 application escrow.
 
-The owner confirmed that the existing private local connection points to the production database. The preflight used a transaction with `transaction_read_only=on` and reported counts/schema flags, not user records.
+Historical metadata IDs such as `42364` and `910954` do not exist on that contract. The reviewed reconciliation marks matching production rows `legacy_unverified`; it does not delete or present them as agreements.
 
-- All seven baseline application tables exist.
-- Duplicate wallet-link groups: **0**; duplicate chat-link groups: **0**.
-- Non-normalized wallet addresses: **0**.
-- No `drizzle.__drizzle_migrations` journal exists.
-- V2 `wallet_sessions`, `rate_limits`, and `milestone_evidence` tables are absent.
-- Stored nonce message, scoped/verified metadata, creation hash, signed-token provenance, and verified-link columns are absent.
-- Production requires V2 schema changes and an explicit baseline plan. This was a preflight PASS, not a migration PASS.
+## Production Application Status
 
-Vercel's sensitive production values were not exportable: it returned `[SENSITIVE]` placeholders for four variables. Those placeholders were never used to connect. `APP_URL` and `RATE_LIMIT_SECRET` were absent from the production configuration inspected.
+- Production alias: https://pactora-tan.vercel.app
+- Telegram bot: https://t.me/PactoraAlertsBot
+- Webhook target: https://pactora-tan.vercel.app/api/telegram/webhook
+- The V2 public address is inlined during the Next.js build. Updating the Vercel production environment without a new production deployment does not cut over the client bundle.
+- Database schema/reconciliation must be applied to the confirmed production database before the V2 web deployment.
 
-## Safe Release Order: Pending Owner Action
+## Database Migration Boundary
 
-1. The owner imports/uses a locally encrypted Foundry keystore and runs the testnet-only V2 deployment command below. The agent does not broadcast.
-2. Provide only the public V2 address and deployment transaction hash. Verify chain `31611`, successful creation receipt, `VERSION()==2`, MUSD default token, enforced allowlist, and code/source identity.
-3. Set the verified `NEXT_PUBLIC_PACTORA_ESCROW_ADDRESS` locally and in Vercel. Set HTTPS `APP_URL=https://pactora-tan.vercel.app`, a strong random `RATE_LIMIT_SECRET`, the real bot configuration, and the webhook secret without exposing values.
-4. Rerun duplicate/normalization preflight immediately before schema changes. Because the baseline has no migration journal, do **not** blindly run all migrations. Review a schema-only `db:push` delta or establish an explicit, verified migration baseline first. Do not silently delete duplicate records.
-5. If using `db:push`, separately execute the reviewed legacy-webhook payload redaction from `drizzle/0001_cute_talisman.sql`; schema pushing does not run data updates. Preserve update IDs/statuses and require signed relinking for old unverified links.
-6. Apply the reviewed production schema before deploying the web app. Rerun typecheck, lint, tests, build, browser smoke and client-secret scan with verified public configuration.
-7. Deploy with `vercel --prod`; the public escrow address is inlined at build time. Reset the production webhook with the exact configured shared secret and check `getWebhookInfo` for errors.
-8. Run actual private-chat commands and the two-wallet create/accept/fund/submit/approve/receipt flow. Record only real successful transaction hashes and received bot replies. Check the live bundle and sanitized logs, then finalize submission materials.
+The last read-only production preflight found all baseline tables, no duplicate linked-wallet/chat groups, no non-normalized wallets, and no Drizzle migration journal. Therefore, do not blindly replay baseline migrations against existing production tables.
 
-Owner-only command from the repository root:
+Safe order:
 
-```powershell
-pnpm.cmd exec node scripts/run-foundry.mjs script script/DeployPactoraEscrow.s.sol:DeployPactoraEscrow --rpc-url https://rpc.test.mezo.org --chain-id 31611 --account pactora-testnet --broadcast --legacy
-```
-
-The alias is a locally encrypted keystore, not a private key argument. If it does not exist, the owner can import it privately with `cast wallet import pactora-testnet --interactive`. Never send the key/password to the agent.
-
-## Evidence Boundaries
-
-The screenshots under `submission/screenshots/` show the **existing live V1 help page**, not V2 functionality or a successful payment. The old live footer's license text is not authoritative; the repository's `LICENSE` is Apache-2.0.
-
-The 2026-11-07 direct RPC formatter run observed an unfunded legacy agreement #1 with a 300 MUSD budget and a wallet with 0 MUSD. It was not a funded escrow demo. V1 is immutable and retains disclosed issues; local V2 fixes do not retroactively fix it.
+1. Confirm the private database target without printing its URL.
+2. Apply the reviewed `0002` expand migration to the existing schema.
+3. Run `pnpm.cmd db:reconcile-agreements` as a dry run, review affected IDs, then rerun with `--apply`.
+4. Confirm `legacy_unverified` rows are preserved and hidden by default.
+5. Set the V2 escrow in the Vercel Production environment and redeploy.
+6. Re-register and verify the Telegram webhook.
+7. Run the live HTTP, rendered-DOM, chain, log, and client-bundle secret checks.
