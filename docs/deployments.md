@@ -53,21 +53,28 @@ Historical metadata IDs such as `42364` and `910954` do not exist on that contra
 ## Production Application Status
 
 - Production alias: https://pactora-tan.vercel.app
+- Immutable deployment URL: https://pactora-40tmszwxy-mfaver.vercel.app
+- Vercel deployment ID: `dpl_Bvk7dEhcADXKzZukktHEmA4vg23t`
+- Deployment target/status: Production / Ready
+- Deployment created: `2026-11-09 16:52:19 GMT+03:00`
 - Telegram bot: https://t.me/PactoraAlertsBot
 - Webhook target: https://pactora-tan.vercel.app/api/telegram/webhook
-- The V2 public address is inlined during the Next.js build. Updating the Vercel production environment without a new production deployment does not cut over the client bundle.
-- Database schema/reconciliation must be applied to the confirmed production database before the V2 web deployment.
+- `NEXT_PUBLIC_PACTORA_ESCROW_ADDRESS` was set in the Vercel Production environment before this deployment.
+- Telegram `setWebhook` returned success; `getWebhookInfo` reported the production URL, pending updates `0`, allowed updates `message`, and no `last_error_message`.
 
-## Database Migration Boundary
+## Production Database Migration
 
-The last read-only production preflight found all baseline tables, no duplicate linked-wallet/chat groups, no non-normalized wallets, and no Drizzle migration journal. Therefore, do not blindly replay baseline migrations against existing production tables.
+The authorized production preflight found all `0001` schema features already present, no duplicate linked-wallet/chat groups, no non-normalized wallets, no `0002` agreement identity columns, and no Drizzle migration journal. The guarded baseline command verified that exact shape and the expected `0001` partial index, then recorded migrations `0000` and `0001`. Drizzle transactionally applied only `0002`.
 
-Safe order:
+- Post-migration preflight: PASS
+- Migration journal entries: `3`
+- Missing baseline tables: `0`
+- Duplicate wallet/chat link groups: `0` / `0`
+- Non-normalized wallets: `0`
+- Required V2 tables and columns: present
+- Agreement rows checked against chain: `1`
+- Rows marked `legacy_unverified`: legacy escrow agreement ID `673070`
+- Rows deleted: `0`
+- Second reconciliation dry run: no additional changes
 
-1. Confirm the private database target without printing its URL.
-2. Apply the reviewed `0002` expand migration to the existing schema.
-3. Run `pnpm.cmd db:reconcile-agreements` as a dry run, review affected IDs, then rerun with `--apply`.
-4. Confirm `legacy_unverified` rows are preserved and hidden by default.
-5. Set the V2 escrow in the Vercel Production environment and redeploy.
-6. Re-register and verify the Telegram webhook.
-7. Run the live HTTP, rendered-DOM, chain, log, and client-bundle secret checks.
+The database URL, bot token, webhook secret, and rate-limit secret were never printed or committed.
