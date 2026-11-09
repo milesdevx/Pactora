@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 72" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Pactora</title>
+  <desc id="desc">Pactora milestone escrow wordmark.</desc>
+  <g transform="translate(4 4)">
+    <path d="M18 11H38C47.9 11 54 16.2 54 23.8C54 32.4 47.8 38.4 35 44C27.6 40.6 21.9 35.8 18 30" stroke="#14b8a6" stroke-width="9.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M18 11V54" stroke="#14b8a6" stroke-width="10" stroke-linecap="round"/>
+    <path d="M29 24.5H42" stroke="#14b8a6" stroke-width="2.5" stroke-linecap="round"/>
+    <circle cx="29" cy="24.5" r="2.75" fill="#14b8a6"/>
+    <circle cx="35.5" cy="24.5" r="2.75" fill="#14b8a6"/>
+    <circle cx="42" cy="24.5" r="2.75" fill="#14b8a6"/>
+  </g>
+  <text x="80" y="46" fill="#f1f5f9" font-family="DM Sans, Inter, Arial, sans-serif" font-size="34" font-weight="600" letter-spacing="-1.2">Pactora</text>
+</svg>

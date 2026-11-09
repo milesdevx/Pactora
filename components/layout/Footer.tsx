@@ -1,6 +1,7 @@
 import React from "react";
 import Link from "next/link";
-import { ExternalLink, ShieldCheck, Heart } from "lucide-react";
+import { ExternalLink, ShieldCheck } from "lucide-react";
+import { PactoraMark } from "@/components/brand/PactoraMark";
 
 export function Footer() {
   return (
@@ -10,9 +11,7 @@ export function Footer() {
           {/* Brand Info */}
           <div className="md:col-span-1 space-y-3">
             <div className="flex items-center gap-2">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-500/10 border border-teal-500/30 text-teal-400 font-bold text-sm">
-                P
-              </div>
+              <PactoraMark className="h-7 w-7 text-teal-400" />
               <span className="text-base font-bold text-white tracking-tight">
                 Pactora
               </span>
@@ -129,4 +128,3 @@ export function Footer() {
     </footer>
   );
 }
-

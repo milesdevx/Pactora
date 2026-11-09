@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Pactora Telegram avatar</title>
+  <desc id="desc">The Pactora shield and milestone mark centered for a circular avatar crop.</desc>
+  <rect width="64" height="64" fill="#080d1a"/>
+  <g transform="translate(8 8) scale(.75)">
+    <path d="M18 11H38C47.9 11 54 16.2 54 23.8C54 32.4 47.8 38.4 35 44C27.6 40.6 21.9 35.8 18 30" stroke="#14b8a6" stroke-width="9.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M18 11V54" stroke="#14b8a6" stroke-width="10" stroke-linecap="round"/>
+    <path d="M29 24.5H42" stroke="#14b8a6" stroke-width="2.5" stroke-linecap="round"/>
+    <circle cx="29" cy="24.5" r="2.75" fill="#14b8a6"/>
+    <circle cx="35.5" cy="24.5" r="2.75" fill="#14b8a6"/>
+    <circle cx="42" cy="24.5" r="2.75" fill="#14b8a6"/>
+  </g>
+</svg>

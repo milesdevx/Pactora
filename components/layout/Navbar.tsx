@@ -3,12 +3,13 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { useAccount, useConnect, useDisconnect, useSwitchChain } from "wagmi";
 import { mezoTestnet } from "@/lib/chain/config";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { AddressChip } from "@/components/ui/AddressChip";
+import { PactoraMark } from "@/components/brand/PactoraMark";
 import {
   Wallet,
   CheckCircle2,
@@ -32,8 +33,6 @@ export function Navbar() {
   const { connect, connectors, isPending } = useConnect();
   const { disconnect } = useDisconnect();
   const { switchChain } = useSwitchChain();
-  const shouldReduceMotion = useReducedMotion();
-
   const [copied, setCopied] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -87,16 +86,7 @@ export function Navbar() {
         {/* Brand Logo */}
         <div className="flex items-center gap-8">
           <Link href="/" className="flex items-center gap-3 group">
-            <div className="relative flex h-9 w-9 items-center justify-center rounded-lg bg-teal-500/10 border border-teal-500/30 text-teal-400 font-bold transition-transform group-hover:scale-105">
-              <span>P</span>
-              {/* Rotating alive indicator */}
-              <div
-                className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-teal-400 ring-2 ring-[#080d1a]"
-                style={{
-                  animation: shouldReduceMotion ? "none" : "orbit 4s linear infinite",
-                }}
-              />
-            </div>
+            <PactoraMark className="h-9 w-9 text-teal-400 transition-transform duration-200 group-hover:scale-105" />
             <div className="flex flex-col">
               <span className="text-base font-bold tracking-tight text-white flex items-center gap-1.5">
                 Pactora

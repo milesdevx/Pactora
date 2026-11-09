@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">Pactora</title>
+  <rect width="64" height="64" rx="14" fill="#14b8a6"/>
+  <path d="M20 49V15H35C44 15 49 19.8 49 27C49 34.2 44 39 35 39H20" fill="none" stroke="#f8fafc" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
