@@ -11,6 +11,12 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
+export const AGREEMENT_VERIFICATION_STATUS = {
+  verified: "verified",
+  unverified: "unverified",
+  legacyUnverified: "legacy_unverified",
+} as const;
+
 /**
  * Users table: tracks registered wallet addresses
  */
@@ -99,8 +105,10 @@ export const notificationJobs = pgTable("notification_jobs", {
 export const agreementMetadata = pgTable("agreement_metadata", {
   id: uuid("id").defaultRandom().primaryKey(),
   onChainId: integer("on_chain_id").notNull(),
-  escrowAddress: varchar("escrow_address", { length: 42 }),
+  chainId: integer("chain_id").default(31611).notNull(),
+  escrowAddress: varchar("escrow_address", { length: 42 }).notNull(),
   chainVerified: boolean("chain_verified").default(false).notNull(),
+  verificationStatus: text("verification_status").default(AGREEMENT_VERIFICATION_STATUS.unverified).notNull(),
   creationTxHash: varchar("creation_tx_hash", { length: 66 }),
   title: text("title").notNull(),
   description: text("description"),
@@ -113,9 +121,9 @@ export const agreementMetadata = pgTable("agreement_metadata", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
-  uniqueIndex("agreement_metadata_verified_escrow_id_unique")
-    .on(table.escrowAddress, table.onChainId)
-    .where(sql`${table.chainVerified} = true`),
+  uniqueIndex("agreement_metadata_verified_chain_escrow_id_unique")
+    .on(table.chainId, table.escrowAddress, table.onChainId)
+    .where(sql`${table.verificationStatus} = 'verified'`),
 ]);
 
 /**

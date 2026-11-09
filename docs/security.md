@@ -40,7 +40,7 @@ Sessions are 32-byte random opaque tokens; only SHA-256 hashes persist in `walle
 
 PostgreSQL counters use atomic expiring UPSERTs. `RATE_LIMIT_SECRET` HMAC-hashes route/wallet or trusted Vercel IP identity; there is no in-memory fallback. Only Vercel's forwarding header is trusted on Vercel; other hosts share a route bucket. Missing configuration or database failures fail closed.
 
-Requests use Zod validation, bounded JSON bodies, explicit HTTP errors and sanitized failure logs. `/api/health` is liveness only, not proof of database availability or deployment readiness. Server-only modules prevent database and bot credentials from being bundled into client code.
+Requests use Zod validation, bounded JSON bodies, explicit HTTP errors and sanitized failure logs. `/api/health` is an escrow readiness check: it verifies Mezo Testnet, contract bytecode, V2 views, canonical MUSD and enforced token allowlisting, but does not prove database availability. Server-only modules prevent database and bot credentials from being bundled into client code.
 
 ## Frontend and Receipts
 

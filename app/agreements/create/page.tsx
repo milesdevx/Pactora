@@ -4,9 +4,9 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { useAccount, useReadContract, useWriteContract } from "wagmi";
-import { parseEventLogs } from "viem";
 import { CONTRACT_ADDRESSES } from "@/lib/chain/config";
 import { PACTORA_ESCROW_ABI } from "@/lib/chain/abi/PactoraEscrow";
+import { decodeAgreementCreated } from "@/lib/chain/creation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/input";
@@ -54,7 +54,7 @@ export default function CreateAgreementPage() {
 
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [registration, setRegistration] = useState<{ id: number; body: Record<string, unknown> } | null>(null);
+  const [registration, setRegistration] = useState<{ id: number; txHash: `0x${string}`; body: Record<string, unknown> } | null>(null);
 
   const { writeContractAsync } = useWriteContract();
   const transaction = useConfirmedTransaction();
@@ -165,12 +165,11 @@ export default function CreateAgreementPage() {
         account: address,
       }), false);
       if (!confirmed) return;
-      const event = parseEventLogs({ abi: PACTORA_ESCROW_ABI, logs: confirmed.logs.filter((log) => log.address.toLowerCase() === CONTRACT_ADDRESSES.PACTORA_ESCROW.toLowerCase()), eventName: "AgreementCreated" })[0];
-      if (!event || event.args.client.toLowerCase() !== address.toLowerCase()) throw new Error("Confirmed receipt does not contain this wallet's AgreementCreated event.");
+      const event = decodeAgreementCreated(confirmed, CONTRACT_ADDRESSES.PACTORA_ESCROW, address, cleanProvider as `0x${string}`);
       const onChainId = Number(event.args.agreementId);
       if (!Number.isSafeInteger(onChainId) || onChainId > 2_147_483_647) throw new Error("Agreement ID exceeds metadata support; use the explorer receipt.");
       const body = { ...terms, onChainId, termsHash, creationTxHash: confirmed.transactionHash, tokenAddress: CONTRACT_ADDRESSES.MUSD, totalAmount: formatMusdAmount(total) };
-      setRegistration({ id: onChainId, body });
+      setRegistration({ id: onChainId, txHash: confirmed.transactionHash, body });
       await jsonRequest("/api/agreements", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -191,7 +190,7 @@ export default function CreateAgreementPage() {
       <TestnetGuard />
       <WalletSessionControls />
       {contractVersion !== 2n && <p role="status" className="text-sm text-amber-200">New agreements require the approved V2 testnet deployment. Existing escrow receipts remain read-only.</p>}
-      {registration && <div className="space-y-2 text-sm"><p>Agreement #{registration.id} is confirmed on-chain. Its terms registration still needs to succeed; do not create a duplicate.</p><Button variant="outline" isLoading={isSubmitting} onClick={() => { setIsSubmitting(true); void jsonRequest("/api/agreements", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(registration.body) }).then(() => router.push(`/agreements/${registration.id}`)).catch((error: unknown) => setFormError(error instanceof Error ? error.message : "Registration failed.")).finally(() => setIsSubmitting(false)); }}>Retry verified terms registration</Button></div>}
+      {registration && <div className="space-y-2 text-sm"><p>Agreement #{registration.id} is confirmed on-chain. Its terms registration still needs to succeed; do not create a duplicate.</p><Button variant="outline" isLoading={isSubmitting} onClick={() => { setIsSubmitting(true); void jsonRequest("/api/agreements", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(registration.body) }).then(async () => { setRegistration(null); await transaction.notifyConfirmed(registration.txHash); router.push(`/agreements/${registration.id}`); }).catch((error: unknown) => setFormError(error instanceof Error ? error.message : "Registration failed.")).finally(() => setIsSubmitting(false)); }}>Retry verified terms registration</Button></div>}
       {/* Header */}
       <div>
         <div className="flex items-center gap-2">

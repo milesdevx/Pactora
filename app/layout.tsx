@@ -5,6 +5,7 @@ import { WagmiProvider } from "@/components/wallet/WagmiProvider";
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
 import { ScrollProgress } from "@/components/motion/ScrollProgress";
+import { EscrowConfigurationStatus } from "@/components/chain/EscrowConfigurationStatus";
 
 const syne = Syne({
   subsets: ["latin"],
@@ -67,6 +68,7 @@ export default function RootLayout({
         <ScrollProgress />
         <WagmiProvider>
           <Navbar />
+          <EscrowConfigurationStatus />
           <main className="flex-1 w-full">{children}</main>
           <Footer />
         </WagmiProvider>
@@ -74,4 +76,3 @@ export default function RootLayout({
     </html>
   );
 }
-

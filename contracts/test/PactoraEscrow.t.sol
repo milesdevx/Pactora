@@ -68,6 +68,27 @@ contract PactoraEscrowTest is Test {
         assertEq(msList[1].amount, 2_000 * 10 ** 18);
     }
 
+    function test_CreateAgreement_IdsIncrementAndEventsUseAssignedIdAndParties() public {
+        vm.expectEmit(true, true, true, true, address(escrow));
+        emit PactoraEscrow.AgreementCreated(1, client, provider, address(musd), 3_000 ether, SAMPLE_TERMS_HASH);
+        uint256 first = _createSampleAgreement();
+
+        vm.prank(client);
+        vm.expectRevert(PactoraEscrow.InvalidAddress.selector);
+        escrow.createAgreement(client, address(musd), _amounts(1), _deadlines(1), SAMPLE_TERMS_HASH);
+
+        vm.expectEmit(true, true, true, true, address(escrow));
+        emit PactoraEscrow.AgreementCreated(2, client, provider, address(musd), 3_000 ether, SAMPLE_TERMS_HASH);
+        uint256 second = _createSampleAgreement();
+
+        assertEq(first, 1);
+        assertEq(second, 2);
+        assertEq(escrow.getAgreement(first).id, first);
+        assertEq(escrow.getAgreement(second).id, second);
+        assertEq(escrow.nextAgreementId(), 3);
+        assertEq(escrow.getAgreementCount(), 2);
+    }
+
     function test_CreateAgreement_Revert_ZeroAddress() public {
         uint256[] memory milestones = new uint256[](1);
         milestones[0] = 500 * 10 ** 18;

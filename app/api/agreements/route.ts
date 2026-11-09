@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AgreementListQuerySchema, CreateAgreementSchema } from "@/lib/validation/schemas";
 import { db } from "@/lib/db";
-import { agreementMetadata } from "@/lib/db/schema";
-import { sql } from "drizzle-orm";
+import { AGREEMENT_VERIFICATION_STATUS, agreementMetadata } from "@/lib/db/schema";
+import { and, eq, sql } from "drizzle-orm";
 import { parseUnits } from "viem";
 import { apiError, ApiError, readJson, requireSameOrigin } from "@/lib/security/api";
 import { requireSession } from "@/lib/security/session";
@@ -10,6 +10,7 @@ import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { getEscrowAddress, readChainAgreement, readConfirmedReceipt } from "@/lib/chain/server";
 import { hashAgreementTerms } from "@/lib/chain/terms";
 import { listVerifiedAgreements } from "@/lib/chain/metadata";
+import { CONTRACT_ADDRESSES } from "@/lib/chain/mezo";
 
 export const dynamic = "force-dynamic";
 
@@ -35,16 +36,36 @@ export async function POST(req: NextRequest) {
     const creation = confirmed.logs.filter((log) => log.eventName === "AgreementCreated").find((log) => log.args.agreementId === BigInt(data.onChainId));
     if (!creation || agreement.client.toLowerCase() !== session.walletAddress || creation.args.client.toLowerCase() !== session.walletAddress) throw new ApiError(403, "Receipt does not prove this wallet created the agreement", "INVALID_AGREEMENT_OWNER");
     if (agreement.provider.toLowerCase() !== data.providerAddress || agreement.token.toLowerCase() !== data.tokenAddress) throw new ApiError(400, "Agreement parties or token differ from the chain", "TERMS_MISMATCH");
+    if (agreement.token.toLowerCase() !== CONTRACT_ADDRESSES.MUSD.toLowerCase()) throw new ApiError(400, "The Pactora interface supports canonical MUSD agreements only", "UNSUPPORTED_TOKEN");
     if (agreement.termsHash.toLowerCase() !== data.termsHash || hashAgreementTerms(data) !== data.termsHash) throw new ApiError(400, "Terms content does not match the on-chain hash", "TERMS_MISMATCH");
     const amounts = data.milestoneDetails.map((milestone) => parseUnits(milestone.amount, 18));
     if (parseUnits(data.totalAmount, 18) !== agreement.totalAmount || amounts.reduce((sum, amount) => sum + amount, 0n) !== agreement.totalAmount || amounts.length !== milestones.length || amounts.some((amount, index) => amount !== milestones[index].amount)) {
       throw new ApiError(400, "Milestone amounts differ from the chain", "AMOUNT_MISMATCH");
     }
     if (data.milestoneDetails.some((milestone, index) => BigInt(milestone.deliveryDeadline) !== milestones[index].deliveryDeadline)) throw new ApiError(400, "Delivery deadlines differ from the chain", "DEADLINE_MISMATCH");
-    const [inserted] = await db.insert(agreementMetadata).values({ ...data, escrowAddress: getEscrowAddress(), chainVerified: true })
-      .onConflictDoNothing({ target: [agreementMetadata.escrowAddress, agreementMetadata.onChainId], where: sql`${agreementMetadata.chainVerified} = true` }).returning();
-    if (!inserted) throw new ApiError(409, "Verified agreement terms are already registered and immutable", "TERMS_ALREADY_REGISTERED");
-    return NextResponse.json({ success: true, agreement: inserted }, { status: 201, headers: { "Cache-Control": "no-store" } });
+    const escrowAddress = getEscrowAddress();
+    const values = { ...data, chainId: 31611, escrowAddress, chainVerified: true, verificationStatus: AGREEMENT_VERIFICATION_STATUS.verified };
+    const [inserted] = await db.insert(agreementMetadata).values(values)
+      .onConflictDoNothing({ target: [agreementMetadata.chainId, agreementMetadata.escrowAddress, agreementMetadata.onChainId], where: sql`${agreementMetadata.verificationStatus} = 'verified'` }).returning();
+    if (inserted) return NextResponse.json({ success: true, agreement: inserted, idempotent: false }, { status: 201, headers: { "Cache-Control": "no-store" } });
+
+    const existing = (await db.select().from(agreementMetadata).where(and(
+      eq(agreementMetadata.chainId, 31611),
+      eq(agreementMetadata.escrowAddress, escrowAddress),
+      eq(agreementMetadata.onChainId, data.onChainId),
+      eq(agreementMetadata.verificationStatus, AGREEMENT_VERIFICATION_STATUS.verified),
+    )).limit(1))[0];
+    const existingTerms = existing && CreateAgreementSchema.safeParse({
+      onChainId: existing.onChainId, title: existing.title, description: existing.description || "", termsHash: existing.termsHash,
+      creationTxHash: existing.creationTxHash, clientAddress: existing.clientAddress, providerAddress: existing.providerAddress,
+      tokenAddress: existing.tokenAddress, totalAmount: existing.totalAmount, milestoneDetails: existing.milestoneDetails,
+    });
+    if (!existing || !existingTerms || !existingTerms.success || existingTerms.data.creationTxHash !== data.creationTxHash
+      || existingTerms.data.tokenAddress !== data.tokenAddress || existingTerms.data.totalAmount !== data.totalAmount
+      || existingTerms.data.termsHash !== data.termsHash || hashAgreementTerms(existingTerms.data) !== data.termsHash) {
+      throw new ApiError(409, "Verified agreement terms are already registered and immutable", "TERMS_ALREADY_REGISTERED");
+    }
+    return NextResponse.json({ success: true, agreement: existing, idempotent: true }, { status: 200, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return apiError(error);
   }

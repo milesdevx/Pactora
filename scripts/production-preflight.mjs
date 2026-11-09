@@ -48,12 +48,13 @@ try {
       walletSessions: names.has("wallet_sessions"), rateLimits: names.has("rate_limits"), evidence: names.has("milestone_evidence"),
       storedNonceMessage: hasColumn("auth_nonces", "message"), scopedMetadata: hasColumn("agreement_metadata", "escrow_address"),
       verifiedMetadata: hasColumn("agreement_metadata", "chain_verified"), creationHash: hasColumn("agreement_metadata", "creation_tx_hash"),
+      chainIdentity: hasColumn("agreement_metadata", "chain_id"), verificationStatus: hasColumn("agreement_metadata", "verification_status"),
       tokenProvenance: hasColumn("telegram_link_tokens", "issued_with_session"), verifiedLinks: hasColumn("telegram_links", "wallet_verified"),
     };
     return { readOnly: true, missingBaselineTables, duplicates, nonNormalizedWallets, migrationJournalPresent, appliedMigrationCount, v2, needsV2Schema: Object.values(v2).some((present) => !present), baselinePlanRequired: !migrationJournalPresent && missingBaselineTables.length === 0 };
   });
   console.log(JSON.stringify(result, null, 2));
-  if (result.missingBaselineTables.length || result.duplicates.linkedWalletGroups || result.duplicates.linkedChatGroups || result.nonNormalizedWallets) {
+  if (result.missingBaselineTables.length || result.duplicates.linkedWalletGroups || result.duplicates.linkedChatGroups || result.nonNormalizedWallets || result.needsV2Schema) {
     console.error("PREFLIGHT_BLOCKED: schema or data needs explicit reconciliation; no production changes were made.");
     process.exitCode = 1;
   }

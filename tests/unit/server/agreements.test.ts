@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as listGet, POST as createPost } from "@/app/api/agreements/route";
 import { GET as detailGet } from "@/app/api/agreements/[id]/route";
-import { agreementMetadata, notificationJobs } from "@/lib/db/schema";
+import { AGREEMENT_VERIFICATION_STATUS, agreementMetadata, notificationJobs } from "@/lib/db/schema";
 import { hashAgreementTerms } from "@/lib/chain/terms";
 import { SESSION_COOKIE } from "@/lib/security/session";
 import { defaultDbReply, ESCROW, illustrateDatabase, installIllustrationEnvironment, mixedCase, MUSD, NOW, PROVIDER, renderSql, request, restoreIllustrationEnvironment, TX_HASH, WALLET } from "./fixtures";
@@ -42,7 +42,7 @@ describe("Agreement route ownership and immutable metadata (Illustration fixture
     boundary.rpc.getTransactionReceipt.mockResolvedValue(receipt([creationLog(ESCROW, 1n, 0, body.termsHash)]));
     fixture = illustrateDatabase(boundary.db);
     fixture.reply = (query) => {
-      if (query.kind === "select" && query.table === agreementMetadata) return [{ ...body, escrowAddress: ESCROW, chainVerified: true }];
+      if (query.kind === "select" && query.table === agreementMetadata) return [{ ...body, chainId: 31611, escrowAddress: ESCROW, chainVerified: true, verificationStatus: AGREEMENT_VERIFICATION_STATUS.verified }];
       if (query.kind === "insert" && query.table === agreementMetadata) return [{ ...query.values, id: "illustration-metadata" }];
       return defaultDbReply(query);
     };
@@ -63,7 +63,7 @@ describe("Agreement route ownership and immutable metadata (Illustration fixture
     expect(await response.json()).toEqual({ agreements: [] });
     const where = renderSql(fixture.queries("select", agreementMetadata)[0].where);
     expect(where.sql).toContain('"agreement_metadata"."chain_verified" = $1');
-    expect(where.params).toEqual([true, ESCROW, WALLET, WALLET]);
+    expect(where.params).toEqual([true, AGREEMENT_VERIFICATION_STATUS.verified, 31611, ESCROW, WALLET, WALLET]);
   });
 
   it("does not treat a wallet parameter as authentication", async () => {
@@ -93,7 +93,7 @@ describe("Agreement route ownership and immutable metadata (Illustration fixture
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect((await response.json()).agreement.milestoneDetails[0].amount).toBe("1.0");
     const where = renderSql(fixture.queries("select", agreementMetadata)[0].where);
-    expect(where.params).toEqual([1, ESCROW, true]);
+    expect(where.params).toEqual([1, 31611, ESCROW, true, AGREEMENT_VERIFICATION_STATUS.verified]);
   });
 
   it("does not present missing or poisoned metadata as verified terms", async () => {
@@ -161,24 +161,51 @@ describe("Agreement route ownership and immutable metadata (Illustration fixture
     expect(response.headers.get("cache-control")).toBe("no-store");
     const inserted = fixture.queries("insert", agreementMetadata)[0];
     expect(inserted.values?.chainVerified).toBe(true);
+    expect(inserted.values?.verificationStatus).toBe(AGREEMENT_VERIFICATION_STATUS.verified);
+    expect(inserted.values?.chainId).toBe(31611);
     expect(inserted.values?.escrowAddress).toBe(ESCROW);
     expect(inserted.values?.clientAddress).toBe(WALLET);
     expect((inserted.values?.milestoneDetails as typeof body.milestoneDetails)[0].amount).toBe("1.0");
     expect(inserted.conflictAction).toBe("nothing");
     const target = inserted.conflict?.target as unknown[];
-    expect(target[0] === agreementMetadata.escrowAddress && target[1] === agreementMetadata.onChainId).toBe(true);
-    expect(renderSql(inserted.conflict?.where).sql).toContain('"agreement_metadata"."chain_verified" = true');
+    expect(target[0] === agreementMetadata.chainId && target[1] === agreementMetadata.escrowAddress && target[2] === agreementMetadata.onChainId).toBe(true);
+    expect(renderSql(inserted.conflict?.where).sql).toContain('"agreement_metadata"."verification_status" = \'verified\'');
+    const metadataInsertIndex = boundary.db.insert.mock.calls.findIndex(([table]) => table === agreementMetadata);
+    expect(boundary.rpc.getTransactionReceipt.mock.invocationCallOrder[0]).toBeLessThan(boundary.db.insert.mock.invocationCallOrder[metadataInsertIndex]);
     expect(fixture.queries("insert", notificationJobs).length).toBe(0);
     expect(env.fetchBoundary.mock.calls.length).toBe(0);
   });
 
-  it("does not overwrite existing verified terms when insertion returns no row", async () => {
+  it("returns the immutable existing row for an idempotent retry", async () => {
     const normalReply = fixture.reply;
     fixture.reply = (query) => query.kind === "insert" && query.table === agreementMetadata ? [] : normalReply(query);
     const response = await createPost(request("/api/agreements", body, authHeaders()));
+    expect(response.status).toBe(200);
+    expect((await response.json()).idempotent).toBe(true);
+    expect(boundary.db.update.mock.calls.length).toBe(0);
+  });
+
+  it("does not overwrite conflicting verified terms", async () => {
+    const normalReply = fixture.reply;
+    fixture.reply = (query) => {
+      if (query.kind === "insert" && query.table === agreementMetadata) return [];
+      if (query.kind === "select" && query.table === agreementMetadata) return [{ ...body, title: "Different immutable title", chainId: 31611, escrowAddress: ESCROW, chainVerified: true, verificationStatus: AGREEMENT_VERIFICATION_STATUS.verified }];
+      return normalReply(query);
+    };
+    const response = await createPost(request("/api/agreements", body, authHeaders()));
     expect(response.status).toBe(409);
     expect((await response.json()).code).toBe("TERMS_ALREADY_REGISTERED");
-    expect(boundary.db.update.mock.calls.length).toBe(0);
+  });
+
+  it("uses chain amounts and flags a saved metadata mismatch in dashboard results", async () => {
+    chain.agreement.totalAmount = 2n * 10n ** 18n;
+    chain.milestones[0].amount = 2n * 10n ** 18n;
+    const response = await listGet(request(`/api/agreements?wallet=${WALLET}`, undefined, authHeaders()));
+    expect(response.status).toBe(200);
+    const [agreement] = (await response.json()).agreements;
+    expect(agreement.totalAmount).toBe("2");
+    expect(agreement.metadataMismatch).toBe(true);
+    expect(agreement.title).toBe("Escrow Agreement #1");
   });
 
   it("does not synthesize successful registration after a DB failure", async () => {

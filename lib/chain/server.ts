@@ -5,6 +5,7 @@ import { PACTORA_ESCROW_ABI } from "./abi/PactoraEscrow";
 import { ApiError } from "@/lib/security/api";
 import { WalletAddressSchema } from "@/lib/validation/schemas";
 import { ERC20_ABI } from "./abi/IERC20";
+import { AGREEMENT_NOT_FOUND_MESSAGE, isAgreementMissing } from "./agreements";
 
 export const mezoPublicClient = createPublicClient({ chain: mezoTestnet, transport: http("https://rpc.test.mezo.org", { timeout: 12_000, retryCount: 0 }) });
 
@@ -18,17 +19,41 @@ export async function requireTestnet() {
   if (await mezoPublicClient.getChainId() !== 31611) throw new ApiError(503, "Mezo Testnet RPC mismatch", "NETWORK_MISMATCH");
 }
 
-export async function readChainAgreement(id: number) {
-  await requireTestnet();
+export async function checkEscrowConfiguration() {
   const address = getEscrowAddress();
+  await requireTestnet();
+  let code;
+  try { code = await mezoPublicClient.getBytecode({ address }); }
+  catch { throw new ApiError(503, "Mezo Testnet escrow bytecode could not be read", "ESCROW_CODE_UNAVAILABLE"); }
+  if (!code || code === "0x") throw new ApiError(503, "Configured escrow address has no contract code", "ESCROW_CODE_MISSING");
+
+  try {
+    const [version, agreementCount, defaultToken, enforceTokenAllowlist] = await Promise.all([
+      mezoPublicClient.readContract({ address, abi: PACTORA_ESCROW_ABI, functionName: "VERSION" }),
+      mezoPublicClient.readContract({ address, abi: PACTORA_ESCROW_ABI, functionName: "getAgreementCount" }),
+      mezoPublicClient.readContract({ address, abi: PACTORA_ESCROW_ABI, functionName: "defaultToken" }),
+      mezoPublicClient.readContract({ address, abi: PACTORA_ESCROW_ABI, functionName: "enforceTokenAllowlist" }),
+    ]);
+    if (version !== 2n) throw new ApiError(503, "Configured escrow is not Pactora V2", "ESCROW_VERSION_MISMATCH");
+    if (defaultToken.toLowerCase() !== CONTRACT_ADDRESSES.MUSD.toLowerCase()) throw new ApiError(503, "Configured escrow uses the wrong default token", "ESCROW_TOKEN_MISMATCH");
+    if (!enforceTokenAllowlist) throw new ApiError(503, "Configured escrow token allowlist is disabled", "ESCROW_ALLOWLIST_DISABLED");
+    return { address, version, agreementCount, defaultToken, enforceTokenAllowlist };
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(503, "Configured escrow does not expose Pactora V2 views", "ESCROW_VIEW_UNAVAILABLE");
+  }
+}
+
+export async function readChainAgreement(id: number) {
+  if (!Number.isSafeInteger(id) || id < 1) throw new ApiError(404, AGREEMENT_NOT_FOUND_MESSAGE, "AGREEMENT_NOT_FOUND");
+  const address = getEscrowAddress();
+  await requireTestnet();
   const blockNumber = await mezoPublicClient.getBlockNumber({ cacheTime: 0 });
   const count = await mezoPublicClient.readContract({ address, abi: PACTORA_ESCROW_ABI, functionName: "getAgreementCount", blockNumber });
-  if (BigInt(id) > count) throw new ApiError(404, "Agreement does not exist on Mezo Testnet", "AGREEMENT_NOT_FOUND");
-  const [agreement, milestones] = await Promise.all([
-    mezoPublicClient.readContract({ address, abi: PACTORA_ESCROW_ABI, functionName: "getAgreement", args: [BigInt(id)], blockNumber }),
-    mezoPublicClient.readContract({ address, abi: PACTORA_ESCROW_ABI, functionName: "getMilestones", args: [BigInt(id)], blockNumber }),
-  ]);
-  if (agreement.id === 0n) throw new ApiError(404, "Agreement does not exist on Mezo Testnet", "AGREEMENT_NOT_FOUND");
+  if (BigInt(id) > count) throw new ApiError(404, AGREEMENT_NOT_FOUND_MESSAGE, "AGREEMENT_NOT_FOUND");
+  const agreement = await mezoPublicClient.readContract({ address, abi: PACTORA_ESCROW_ABI, functionName: "getAgreement", args: [BigInt(id)], blockNumber });
+  if (isAgreementMissing(agreement, BigInt(id))) throw new ApiError(404, AGREEMENT_NOT_FOUND_MESSAGE, "AGREEMENT_NOT_FOUND");
+  const milestones = await mezoPublicClient.readContract({ address, abi: PACTORA_ESCROW_ABI, functionName: "getMilestones", args: [BigInt(id)], blockNumber });
   return { agreement, milestones, blockNumber };
 }
 

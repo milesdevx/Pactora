@@ -17,7 +17,9 @@ import { StatusDot } from "@/components/agreements/StatusDot";
 import { TxStatus } from "@/components/tx/TxStatus";
 import { AddressChip } from "@/components/ui/AddressChip";
 import { EscrowVaultBar } from "@/components/agreements/EscrowVaultBar";
+import { AgreementNotFoundState } from "@/components/agreements/AgreementNotFoundState";
 import { AgreementIdSchema } from "@/lib/validation/schemas";
+import { isAgreementMissing } from "@/lib/chain/agreements";
 import { formatChainTime, parseMusdAmount, percentageOf } from "@/lib/chain/amounts";
 import { useConfirmedTransaction } from "@/lib/hooks/useConfirmedTransaction";
 import { useMoneyConfirmation } from "@/components/tx/MoneyConfirmation";
@@ -68,10 +70,13 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
     chainId: 31611,
     query: { enabled: parsedId.success },
   });
+  const hasOnChainAgreement = Boolean(contractAgreement && !isAgreementMissing(contractAgreement, agreementId));
 
   // Read on-chain milestones
   const {
     data: contractMilestones,
+    error: milestonesReadError,
+    isError: isMilestonesError,
     isLoading: isMilestonesLoading,
     refetch: refetchMilestones,
   } = useReadContract({
@@ -80,12 +85,15 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
     functionName: "getMilestones",
     args: [agreementId],
     chainId: 31611,
-    query: { enabled: parsedId.success },
+    query: { enabled: parsedId.success && hasOnChainAgreement },
   });
 
   // Read resolution proposal if any
   const {
     data: resolutionProposal,
+    error: resolutionReadError,
+    isError: isResolutionError,
+    isLoading: isResolutionLoading,
     refetch: refetchProposal,
   } = useReadContract({
     address: CONTRACT_ADDRESSES.PACTORA_ESCROW,
@@ -93,26 +101,26 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
     functionName: "getResolutionProposal",
     args: [agreementId],
     chainId: 31611,
-    query: { enabled: parsedId.success },
+    query: { enabled: parsedId.success && hasOnChainAgreement },
   });
 
   // Read MUSD allowance for client
-  const { data: musdAllowance, refetch: refetchAllowance } = useReadContract({
+  const { data: musdAllowance, error: allowanceReadError, isError: isAllowanceError, isLoading: isAllowanceLoading, refetch: refetchAllowance } = useReadContract({
     address: CONTRACT_ADDRESSES.MUSD,
     abi: ERC20_ABI,
     functionName: "allowance",
     args: address && CONTRACT_ADDRESSES.PACTORA_ESCROW ? [address, CONTRACT_ADDRESSES.PACTORA_ESCROW] : undefined,
     chainId: 31611,
-    query: { enabled: Boolean(address && parsedId.success) },
+    query: { enabled: Boolean(address && parsedId.success && hasOnChainAgreement) },
   });
   const { data: contractVersion } = useReadContract({ address: CONTRACT_ADDRESSES.PACTORA_ESCROW, abi: PACTORA_ESCROW_ABI, functionName: "VERSION", chainId: 31611 });
-  const { data: block } = useBlock({ chainId: 31611, query: { refetchInterval: 15_000 } });
+  const { data: block, error: blockReadError, isError: isBlockReadError, refetch: refetchBlock } = useBlock({ chainId: 31611, query: { refetchInterval: 15_000 } });
   const now = block?.timestamp || 0n;
   const reviewWindow = 7n * 24n * 60n * 60n;
 
   // Off-chain metadata state
   const session = useWalletSession();
-  const metadataQuery = useQuery({ queryKey: ["agreement-metadata", resolvedParams.id, address], enabled: parsedId.success && session.authenticated, retry: false, queryFn: () => jsonRequest<{ agreement: { title: string; description?: string; milestoneDetails: { title: string; description?: string }[] } }>(`/api/agreements/${resolvedParams.id}`) });
+  const metadataQuery = useQuery({ queryKey: ["agreement-metadata", resolvedParams.id, address], enabled: parsedId.success && session.authenticated, retry: false, queryFn: () => jsonRequest<{ agreement: { title: string; description?: string; creationTxHash?: string | null; milestoneDetails: { title: string; description?: string }[] } }>(`/api/agreements/${resolvedParams.id}`) });
   const metadata = metadataQuery.data?.agreement;
   const evidenceQuery = useQuery({ queryKey: ["agreement-evidence", resolvedParams.id, address], enabled: parsedId.success && session.authenticated, retry: false, queryFn: () => jsonRequest<{ evidence: { milestoneIndex: number; kind: string; text: string; contentHash: string; txHash: string }[] }>(`/api/agreements/${resolvedParams.id}/evidence`) });
   const [submissionNotes, setSubmissionNotes] = useState<{ [key: number]: string }>({});
@@ -155,7 +163,7 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
   const isClient = Boolean(currentAddress && currentAddress === clientAddress);
   const isProvider = Boolean(currentAddress && currentAddress === providerAddress);
 
-  const remainingWei = contractAgreement ? contractAgreement.totalAmount - contractAgreement.releasedAmount - contractAgreement.refundedAmount : 0n;
+  const remainingWei = contractAgreement && agreementStateIndex === 2 ? contractAgreement.totalAmount - contractAgreement.releasedAmount - contractAgreement.refundedAmount : 0n;
   const totalAmountFormatted = contractAgreement ? formatUnits(contractAgreement.totalAmount, 18) : "Unavailable";
   const releasedAmountFormatted = contractAgreement ? formatUnits(contractAgreement.releasedAmount, 18) : "Unavailable";
   const remainingBalanceFormatted = contractAgreement ? formatUnits(remainingWei, 18) : "Unavailable";
@@ -331,6 +339,7 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
   if (!parsedId.success) return <div className="mx-auto max-w-4xl p-8"><h1 className="text-2xl font-semibold">Invalid agreement ID</h1><p className="mt-3">Use a positive numeric agreement ID.</p></div>;
   if (isContractLoading) return <div className="mx-auto max-w-4xl p-8"><h1 className="text-2xl font-semibold">Loading agreement</h1><p className="mt-3">Reading confirmed Mezo Testnet state.</p></div>;
   if (contractReadError || (!isContractLoading && !contractAgreement)) return <div className="mx-auto max-w-4xl p-8"><h1 className="text-2xl font-semibold">Agreement unavailable</h1><p className="mt-3">The agreement was not found or Mezo Testnet could not be read. No amounts or success state are being fabricated.</p><Button className="mt-4" onClick={() => { void refetchAgreement(); }}>Retry chain read</Button></div>;
+  if (isAgreementMissing(contractAgreement, agreementId)) return <AgreementNotFoundState agreementId={resolvedParams.id} escrowAddress={CONTRACT_ADDRESSES.PACTORA_ESCROW} creationTxHash={metadata?.creationTxHash} onRetry={() => { void refetchAgreement(); }} />;
   if (contractAgreement && contractAgreement.token.toLowerCase() !== CONTRACT_ADDRESSES.MUSD.toLowerCase()) return <div className="mx-auto max-w-4xl p-8"><h1 className="text-2xl font-semibold">Unsupported escrow token</h1><p className="mt-3 break-all">This agreement uses {contractAgreement.token}. The current interface supports canonical MUSD only and will not label this token as MUSD.</p></div>;
 
   return (
@@ -338,7 +347,9 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
       <TestnetGuard />
       <WalletSessionControls />
       {contractVersion !== 2n && <p role="alert" className="text-sm text-amber-200">This deployment is legacy or unavailable. Money-moving actions are disabled; use the public receipt for read-only verification.</p>}
-      {metadataQuery.error && <p role="status" className="text-sm text-amber-200">Verified private terms could not be loaded: {metadataQuery.error.message}</p>}
+      {metadataQuery.error && <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-amber-200"><span>Verified private terms could not be loaded: {metadataQuery.error.message}</span><Button variant="outline" size="sm" onClick={() => { void metadataQuery.refetch(); }}>Retry terms read</Button></div>}
+      {evidenceQuery.error && <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-amber-200"><span>Verified evidence text could not be loaded: {evidenceQuery.error.message}</span><Button variant="outline" size="sm" onClick={() => { void evidenceQuery.refetch(); }}>Retry evidence read</Button></div>}
+      {isBlockReadError && <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-amber-200"><span>Current block time could not be read. Deadline actions are disabled: {blockReadError?.message}</span><Button variant="outline" size="sm" onClick={() => { void refetchBlock(); }}>Retry block read</Button></div>}
       {evidenceError && <p role="alert" className="text-sm text-amber-200">{evidenceError}</p>}
       {/* Breadcrumb & Public Verifier Link */}
       <div className="flex items-center justify-between">
@@ -552,7 +563,14 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
 
           {isClient && (
             <div className="flex items-center gap-3">
-              {needsAllowance ? (
+              {isAllowanceLoading ? (
+                <p role="status" className="text-xs text-slate-300">Reading confirmed MUSD allowance...</p>
+              ) : isAllowanceError || musdAllowance === undefined ? (
+                <div role="alert" className="space-y-2 text-xs text-rose-200">
+                  <p>MUSD allowance could not be read. Deposit remains disabled. {allowanceReadError?.message}</p>
+                  <Button variant="outline" size="sm" onClick={() => { void refetchAllowance(); }}>Retry allowance read</Button>
+                </div>
+              ) : needsAllowance ? (
                 <Button
                   onClick={handleApproveMUSD}
                   isLoading={isTxPending || isWaitingForReceipt}
@@ -579,6 +597,8 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
       )}
 
       {/* Active Resolution Proposal Banner */}
+      {agreementState === "Funded" && isResolutionLoading && <p role="status" className="text-sm text-slate-300">Reading resolution proposal state...</p>}
+      {agreementState === "Funded" && isResolutionError && <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-950/20 p-4 text-sm text-rose-100"><p>Resolution proposal state could not be read. Resolution actions are disabled. {resolutionReadError?.message}</p><Button className="mt-3" variant="outline" size="sm" onClick={() => { void refetchProposal(); }}>Retry resolution read</Button></div>}
       {resolutionProposal?.exists && (
         <div className="rounded-2xl border border-amber-500/30 bg-amber-950/20 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xl">
           <div className="flex items-start gap-3">
@@ -631,7 +651,7 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
             </CardDescription>
           </div>
 
-          {agreementState === "Funded" && (
+          {agreementState === "Funded" && !isResolutionLoading && !isResolutionError && !resolutionProposal?.exists && (
             <Button
               variant="outline"
               size="sm"
@@ -646,7 +666,17 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
 
         <CardContent className="space-y-6 pt-2">
           {/* Milestones list with Left Vertical Track */}
-          {contractMilestones && contractMilestones.length > 0 ? (
+          {isMilestonesLoading ? (
+            <div className="h-32 flex items-center justify-center text-slate-400 text-xs" role="status">
+              Loading milestone state from blockchain...
+            </div>
+          ) : isMilestonesError ? (
+            <div className="rounded-xl border border-rose-500/30 bg-rose-950/20 p-5 text-sm text-rose-100" role="alert">
+              <p className="font-semibold">Milestone state could not be read</p>
+              <p className="mt-1 break-words text-xs text-rose-200">{milestonesReadError?.message || "Mezo Testnet returned an unknown milestone read error."}</p>
+              <Button className="mt-4" variant="outline" size="sm" onClick={() => { void refetchMilestones(); }}>Retry milestone read</Button>
+            </div>
+          ) : contractMilestones && contractMilestones.length > 0 ? (
             <div className="relative pl-6 sm:pl-8 space-y-6">
               {/* 2px Gradient Vertical Track */}
               <div className="absolute left-2.5 sm:left-3.5 top-4 bottom-4 w-0.5 bg-gradient-to-b from-teal-500 via-slate-700 to-slate-800" />
@@ -771,7 +801,7 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
                             label="Proof Hash"
                             showExplorerLink={false}
                           />
-                          <span className="text-teal-400 font-medium">{delivered ? "Evidence text verified against this hash" : "Hash committed; evidence text unavailable"}</span>
+                          <span className="text-teal-400 font-medium">{delivered ? "Evidence text verified against this hash" : evidenceQuery.isPending ? "Loading verified evidence text..." : evidenceQuery.error ? "Hash committed; evidence service unavailable" : "Hash committed; no verified evidence text is stored"}</span>
                         </div>
                       )}
                       {delivered && <div className="mt-3 space-y-2 text-sm text-slate-200"><p className="whitespace-pre-wrap break-words">{delivered.text}</p><a href={`https://explorer.test.mezo.org/tx/${delivered.txHash}`} target="_blank" rel="noreferrer" className="text-teal-300 underline">Submission transaction</a></div>}
@@ -780,7 +810,7 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
                       {mState === "Rejected" && (
                         <div className="mt-3 p-3 rounded-lg border border-rose-500/30 bg-rose-950/20 text-xs text-rose-300">
                           <span className="font-semibold block mb-0.5">Rejection Notice:</span>
-                          {rejected?.text || "A rejection hash is committed on-chain; its text is unavailable."}
+                          {rejected?.text || (evidenceQuery.isPending ? "Loading verified rejection text..." : evidenceQuery.error ? "A rejection hash is committed on-chain; the evidence service is unavailable." : "A rejection hash is committed on-chain; no verified rejection text is stored.")}
                         </div>
                       )}
 
@@ -890,7 +920,7 @@ export default function AgreementWorkspacePage({ params }: AgreementWorkspacePro
             </div>
           ) : (
             <div className="h-32 flex items-center justify-center text-slate-500 text-xs">
-              Loading milestone state from blockchain...
+              This agreement has no milestone state on this contract.
             </div>
           )}
         </CardContent>

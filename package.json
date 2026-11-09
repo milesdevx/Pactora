@@ -16,6 +16,7 @@
     "db:generate": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs generate",
     "db:migrate": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs migrate",
     "db:push": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs push",
+    "db:reconcile-agreements": "node --experimental-strip-types --env-file-if-exists=.env.local scripts/reconcile-agreements.mjs",
     "contracts:test": "node scripts/run-foundry.mjs test",
     "contracts:build": "node scripts/run-foundry.mjs build",
     "contracts:abi": "node scripts/export-escrow-abi.mjs"

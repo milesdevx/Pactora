@@ -8,10 +8,19 @@ import { Button } from "@/components/ui/button";
 type SessionContext = { authenticated: boolean; signing: boolean; error: string | null; ensureSession: () => Promise<void> };
 const Context = createContext<SessionContext | null>(null);
 
+export class JsonRequestError extends Error {
+  constructor(message: string, public status: number, public code?: string) {
+    super(message);
+  }
+}
+
 export async function jsonRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { credentials: "same-origin", cache: "no-store", ...init });
-  const data = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(data?.error || `Request failed (${response.status}).`);
+  const data = await response.json().catch(() => null) as { error?: string; code?: string } | T | null;
+  if (!response.ok) {
+    const body = data as { error?: string; code?: string } | null;
+    throw new JsonRequestError(body?.error || `Request failed (${response.status}).`, response.status, body?.code);
+  }
   return data as T;
 }
 

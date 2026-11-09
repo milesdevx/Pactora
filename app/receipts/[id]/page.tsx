@@ -6,7 +6,8 @@ import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { AgreementIdSchema } from "@/lib/validation/schemas";
 import { CONTRACT_ADDRESSES } from "@/lib/chain/config";
-import { jsonRequest } from "@/components/wallet/WalletSessionProvider";
+import { JsonRequestError, jsonRequest } from "@/components/wallet/WalletSessionProvider";
+import { AgreementNotFoundState } from "@/components/agreements/AgreementNotFoundState";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +35,7 @@ function ReceiptContent({ params }: { params: Promise<{ id: string }> }) {
   const receipt = useQuery({ queryKey: ["public-receipt", id, escrow], enabled: parsed.success, retry: false, queryFn: () => jsonRequest<Receipt>(`/api/receipts/${id}?escrow=${encodeURIComponent(escrow)}`) });
   const data = receipt.data;
   if (!parsed.success) return <div className="mx-auto max-w-4xl p-8"><h1 className="text-2xl font-semibold">Invalid receipt ID</h1><p className="mt-3">Use a positive numeric agreement ID.</p></div>;
+  if (receipt.error instanceof JsonRequestError && receipt.error.code === "AGREEMENT_NOT_FOUND") return <AgreementNotFoundState agreementId={id} escrowAddress={escrow} onRetry={() => { void receipt.refetch(); }} />;
 
   return <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 space-y-6">
     <Link href="/dashboard" className="text-sm text-slate-300 hover:text-white">Back to Pactora</Link>

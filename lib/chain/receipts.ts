@@ -4,17 +4,18 @@ import { ApiError } from "@/lib/security/api";
 import { PACTORA_ESCROW_ABI } from "./abi/PactoraEscrow";
 import { LEGACY_ESCROW_ABI, LEGACY_ESCROW_ADDRESS } from "./abi/LegacyPactoraEscrow";
 import { getEscrowAddress, mezoPublicClient, readTokenDetails, requireTestnet } from "./server";
+import { AGREEMENT_NOT_FOUND_MESSAGE, isAgreementMissing } from "./agreements";
 
 export async function readEscrowAgreement(id: number, address = getEscrowAddress()) {
+  if (!Number.isSafeInteger(id) || id < 1) throw new ApiError(404, AGREEMENT_NOT_FOUND_MESSAGE, "AGREEMENT_NOT_FOUND");
   await requireTestnet();
   const abi = address === LEGACY_ESCROW_ADDRESS ? LEGACY_ESCROW_ABI : PACTORA_ESCROW_ABI;
   const blockNumber = await mezoPublicClient.getBlockNumber({ cacheTime: 0 });
   const count = await mezoPublicClient.readContract({ address, abi, functionName: "getAgreementCount", blockNumber });
-  if (BigInt(id) > count) throw new ApiError(404, "Agreement does not exist on Mezo Testnet", "AGREEMENT_NOT_FOUND");
-  const [agreement, milestones] = await Promise.all([
-    mezoPublicClient.readContract({ address, abi, functionName: "getAgreement", args: [BigInt(id)], blockNumber }),
-    mezoPublicClient.readContract({ address, abi, functionName: "getMilestones", args: [BigInt(id)], blockNumber }),
-  ]);
+  if (BigInt(id) > count) throw new ApiError(404, AGREEMENT_NOT_FOUND_MESSAGE, "AGREEMENT_NOT_FOUND");
+  const agreement = await mezoPublicClient.readContract({ address, abi, functionName: "getAgreement", args: [BigInt(id)], blockNumber });
+  if (isAgreementMissing(agreement, BigInt(id))) throw new ApiError(404, AGREEMENT_NOT_FOUND_MESSAGE, "AGREEMENT_NOT_FOUND");
+  const milestones = await mezoPublicClient.readContract({ address, abi, functionName: "getMilestones", args: [BigInt(id)], blockNumber });
   return { agreement, milestones, blockNumber, count, address, legacy: address === LEGACY_ESCROW_ADDRESS };
 }
 

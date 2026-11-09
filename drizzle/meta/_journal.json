@@ -15,6 +15,13 @@
       "when": 1794072317497,
       "tag": "0001_cute_talisman",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794212284032,
+      "tag": "0002_early_khan",
+      "breakpoints": true
     }
   ]
 }

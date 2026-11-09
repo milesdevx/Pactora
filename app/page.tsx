@@ -57,7 +57,7 @@ export default function LandingPage() {
             MEZO TESTNET
           </Badge>
           <span>
-            Pactora is live on Mezo Testnet (Chain ID 31611) with verified MUSD token escrow.
+            Pactora is configured for Mezo Testnet (Chain ID 31611) and canonical MUSD.
           </span>
           <a
             href="https://faucet.test.mezo.org/"
@@ -303,8 +303,8 @@ export default function LandingPage() {
                 🤖
               </div>
               <div>
-                <p className="text-xs font-bold text-white">Pactora Bot</p>
-                <p className="text-[11px] text-teal-400">Verified Bot (@PactoraEscrowBot)</p>
+                <p className="text-xs font-bold text-white">Pactora Alerts</p>
+                <p className="text-[11px] text-teal-400">Illustrative notification</p>
               </div>
             </div>
             <motion.div
@@ -314,6 +314,7 @@ export default function LandingPage() {
               transition={{ duration: 0.4 }}
               className="mt-4 p-3.5 rounded-xl bg-slate-800/80 border border-slate-700 text-xs text-slate-200 leading-relaxed font-sans space-y-2 shadow-inner"
             >
+              <p className="font-semibold text-amber-300">Illustration, not a delivered bot message</p>
               <div className="flex items-center justify-between">
                 <p className="font-semibold text-teal-300 flex items-center gap-1.5">
                   <Sparkles className="h-3.5 w-3.5 text-teal-400" />
