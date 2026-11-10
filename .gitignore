@@ -34,3 +34,6 @@ contracts/lcov.info
 .DS_Store
 Thumbs.db
 *.log
+
+.vscode/
+.github/
