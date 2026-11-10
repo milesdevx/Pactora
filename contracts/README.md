@@ -47,9 +47,13 @@ $ anvil
 
 ### Deploy
 
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
+Testnet only. Unaudited. No subjective dispute arbitration. Run from this directory only if an owner intends a new deployment, using a dedicated testnet wallet. Keep `DEPLOYER_PRIVATE_KEY` local; never print or commit it.
+
+```powershell
+forge script script/DeployPactoraEscrow.s.sol:DeployPactoraEscrow --rpc-url https://rpc.test.mezo.org --chain-id 31611 --private-key $env:DEPLOYER_PRIVATE_KEY --broadcast --legacy
 ```
+
+V2 is already deployed. [Deployment checks](../docs/deployments.md) record the verified address, receipts and remaining gaps. OpenZeppelin/forge-std are vendored in `lib`; a normal checkout needs no fresh `forge install`.
 
 ### Cast
 

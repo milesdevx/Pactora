@@ -1,102 +1,58 @@
-# Pactora End-to-End Buildathon Demo Script
+# Pactora Testnet Verification Walkthrough
 
-This document is a step-by-step presentation script designed for hackathon judges and technical evaluators exploring the Pactora application on Mezo Testnet.
+Last updated: **2026-11-10 UTC**. **Testnet only. Unaudited. No subjective dispute arbitration.**
 
----
+This is an operational checklist, not a pitch or video script. Steps below describe what to verify; they do not claim those interactions have all occurred. Use two separate testnet wallets, the verified V2 address and actual receipts. Any sample amount or homepage preview is **Illustration, not real funds**.
 
-## Prerequisites & Test Environment
+## Verified Starting Point
 
-1. **Browser Wallet:** MetaMask or Rabby configured for **Mezo Testnet**:
-   - **RPC URL:** `https://rpc.test.mezo.org`
-   - **Chain ID:** `31611` (`0x7b7b`)
-   - **Currency Symbol:** `BTC`
-   - **Explorer:** `https://explorer.test.mezo.org`
-2. **Test Assets:**
-   - Testnet BTC for gas: obtain via the Mezo Testnet faucet.
-   - Testnet MUSD: canonical address `0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503`.
-3. **Telegram Account:** Mobile or Desktop Telegram app.
+The [deployment record](deployments.md) verifies the V2 contract and current app address cutover. [Public V2 receipt 1](https://pactora-tan.vercel.app/receipts/1) has real creation and provider-acceptance transactions but is Accepted/unfunded. Bot identity and webhook registration are verified, not private-chat delivery.
 
----
+**Pending verification:** the remaining allowance/fund/submit/approve/payout run, signed Telegram linking and actual command/alert captures. Record only hashes from successful real receipts; never prepare substitute hashes or payment screenshots.
 
-## Demo Walkthrough (8 Minutes)
+## Prepare
 
-### Act 1: Landing Page & Protocol Overview (1 min)
-1. Navigate to the Pactora homepage (`/`).
-2. **Highlight the value proposition:**
-   - "Work agreed. Funds protected. Payments verified."
-   - Point out the real-time Mezo network badge in the navigation header indicating Chain ID 31611.
-    - The homepage preview is **"Illustration, not real funds"**. It sends no transactions and must never be shown as proof of a live payout.
-3. Click **"Launch App"** or **"Dashboard"**.
+1. Open [help](https://pactora-tan.vercel.app/help) and confirm Mezo Testnet `31611`, canonical MUSD and the [V2 address](https://explorer.test.mezo.org/address/0x907AAB5A6d1710c477B9C1Da3c3b60b1324A060A).
+2. Obtain test BTC through the [faucet](https://faucet.test.mezo.org/) and use the [Mezo testnet app](https://testnet.mezo.org) for MUSD. Keep BTC for gas. These URLs/guidance were checked, but actual asset acquisition is **Pending verification** in Phase 0.
+3. Choose different client/provider wallets and agree on actual positive test-MUSD milestone amounts and future delivery deadlines. Keep keys/seed phrases in the wallets only. Read [security](security.md) before signing.
+4. Use a valid signed session for both wallets before in-app writes; the app requests one automatically when absent. Working DB/auth routes are required, and verified metadata must load before provider acceptance in the UI. A wallet connection alone is not an authenticated session.
 
----
+## Link Telegram
 
-### Act 2: Connecting Telegram for Instant Alerts (1.5 min)
-1. Go to **Settings > Telegram Notifications** (`/settings/telegram`).
-2. Connect your wallet using the top-right button.
-3. Click **"Generate Link Token"**:
-   - Note the single-use 15-minute token generated securely via CSPRNG.
-   - Click the deep-link button **"Open in Telegram (@PactoraAlertsBot)"**.
-4. In Telegram, the bot displays the `/start` command with the token:
-   - Send the message.
-   - The bot responds instantly: *"Account successfully linked to wallet 0x123...!"*
-5. Return to the browser and inspect the link status. Use **"Send Test Alert"** only if test notifications were explicitly enabled; production disables this endpoint by default. A test alert is not a chain payment notification.
+1. Open [Telegram settings](https://pactora-tan.vercel.app/settings/telegram) as each participant and use Generate One-Time Link.
+2. Sign the custom five-minute authentication nonce, request the 15-minute single-use link and send `/start link_<token>` in the private [PactoraAlertsBot](https://t.me/PactoraAlertsBot) chat. There is no `/link` command.
+3. Refresh link status and verify the actual stored own-wallet link. Capture the real reply only if it arrives; webhook HTTP success does not prove delivery.
+4. Try `/help`, `/balance`, `/agreements`, `/pending`, `/getmusd` and `/notifications`. `/start` without a payload gives instructions; `/unlink` removes the link when finished. The bot guides, never signs money actions or executes borrowing.
 
----
+## Create and Accept
 
-### Act 3: Creating a Milestone Agreement (2 min)
-1. Navigate to **New Agreement** (`/agreements/create`).
-2. Input the contract terms:
-   - **Title:** "Mezo Ecosystem Analytics Dashboard"
-   - **Provider Address:** Enter the counterparty's address (or a secondary test wallet).
-   - **Terms & Description:** Scope of work, deliverables, and deadlines.
-3. Configure the Milestone Breakdown:
-   - **Milestone 1:** "Architecture Design & Schema Specification" — `250 MUSD`
-   - **Milestone 2:** "Smart Contract Development & Foundry Tests" — `500 MUSD`
-    - **Milestone 3:** "Frontend Integration & Testnet Verification" - `250 MUSD`
-4. These are **Illustration** amounts for planning the recording. Use only the real balances available in your two test wallets. The application anchors terms with `keccak256` of the JSON terms; SHA-256 is used for link tokens, not agreement terms.
-5. Click **"Deploy Agreement"**:
-   - The wallet prompts for transaction signature on `PactoraEscrow.createAgreement(...)`.
-   - On confirmation, the agreement details page loads (`/agreements/[id]`).
-    - Record a creation notification only if it was actually delivered after chain confirmation. Do not invent a notification or transaction hash.
+1. As client, open [Create Agreement](https://pactora-tan.vercel.app/agreements/create), supply the provider, terms, positive MUSD amounts and future deadlines. Human-readable terms use keccak256 into `bytes32`, not SHA-256.
+2. Review and sign the creation transaction. Wait for a successful receipt and read the actual ID from the configured-escrow `AgreementCreated` event. Never use a clock/random ID. Verify metadata registration separately; a saved title does not prove a chain transaction.
+3. As provider, open that ID and inspect the parties/amounts/deadlines before accepting. A missing/default ID must show "Agreement not found on this contract". Record the actual acceptance receipt.
 
----
+## Allowance and Deposit
 
-### Act 4: Escrow Funding & Milestone Execution (2.5 min)
-1. **Provider Acceptance:**
-   - Switch to the provider wallet (or review provider actions).
-   - Click **"Accept Agreement"** to formally accept the terms on-chain.
-2. **Client MUSD Escrow Funding:**
-   - As the client, click **"Approve MUSD Escrow"** (triggers ERC-20 `approve` for 1,000 MUSD).
-   - Once approved, click **"Deposit 1,000 MUSD to Escrow"** (`fundAgreement`).
-   - The escrow balance updates to 1,000 MUSD, held securely in the non-custodial smart contract.
-   - Telegram sends a funding confirmation alert.
-3. **Milestone 1 Submission:**
-   - As provider, click **"Submit Proof"** on Milestone 1.
-   - Paste deliverable link / GitHub commit hash.
-   - The milestone status changes to `Submitted`.
-   - The client receives a Telegram notification: *"Milestone 1 submitted for review"*.
-4. **Milestone 1 Approval & Immediate Payout:**
-   - As client, review the submission and click **"Approve & Release 250 MUSD"**.
-   - The smart contract executes `approveMilestone`, releasing 250 MUSD directly to the provider's wallet.
-   - The escrow balance decreases to 750 MUSD.
-   - Telegram notifies the provider of payment receipt.
+1. As client, approve the exact total MUSD allowance for V2. Wait for its receipt. This is authorization, not deposited escrow.
+2. Send `fundAgreement` separately. Every original delivery deadline must still be in the future. Record the successful funding receipt and actual token transfer into escrow.
+3. Check the public receipt's funded amount and state. Do not equate an agreement total with funded assets. An alert can be claimed only if a real server-confirmed event message is received; notification delivery failure does not undo the chain transaction.
 
----
+## Deliver and Release
 
-### Act 5: Public Audit Receipts & Mutual Settlement (1 min)
-1. Click **"View Public Receipt"** or navigate to `/receipts/[id]`:
-   - View the immutable, read-only payment receipt.
-   - Show the verified Mezo Explorer transaction hashes, participant addresses, and milestone timestamps.
-   - Click **"Print / Save PDF"** to demonstrate client accounting and invoice readiness.
-2. **Mutual Consent Resolution Demo (Edge Case Handling):**
-   - If the project scope changes, show the **Mutual Dispute Settlement** card on the agreement page.
-   - Demonstrate how either party can propose a custom split of the remaining escrow (e.g. 500 MUSD refund to client, 250 MUSD payout to provider).
-   - Explain how the smart contract guarantees mathematical invariance before executing mutual settlement without centralized arbiter risk.
+1. As provider, submit actual notes or a URL before the delivery/resubmission cutoff. The hash commits to the supplied string, not the content fetched from a URL or proof of quality.
+2. Wait for the successful submission receipt. Check that any stored evidence matches its author/event/hash; unavailable metadata must remain labelled unavailable.
+3. As client, review the submission and approve. Inspect the actual full milestone amount, MUSD address and provider recipient before signing.
+4. Record the approval receipt and actual provider MUSD transfer. Check `releasedAmount`, remaining balance and state in the public receipt; repeat only for real agreed milestones.
 
----
+## Optional Timeout or Mutual Settlement Checks
 
-## Conclusion & Judge Takeaways
+`REVIEW_WINDOW` is **604,800 seconds**. Provider `claimAfterTimeout` starts at `submittedAt + 604800` for still-Submitted work; rejection must be strictly earlier. This is not an instant simulator operation. Local `vm.warp` tests are not seven days on Mezo Testnet.
 
-- **Non-Custodial & Invariant-Enforced:** Funds are never controlled by Pactora servers; all releases follow strict Solidity state machine rules.
-- **Tailored for Mezo:** Built specifically around Bitcoin gas mechanics and canonical MUSD escrow.
-- **Testnet UX:** Record only confirmed transactions and messages actually received. The labelled homepage illustration is not a live demo.
+Client `refundNoShow` starts at a Pending milestone's deadline or a Rejected milestone's `max(deliveryDeadline, rejectedAt + 604800)`. Submitted work is never eligible. These paths need real eligible states, elapsed chain time and transactions; live timeout/refund evidence is **Pending verification**.
+
+Either party may propose a split of the remaining balance. The other party must review and accept the exact current `bytes32 proposalHash`; replacement or a release/refund can invalidate it. Fully settled agreements are Completed only if cumulative refund is zero, otherwise Cancelled. The contract does not judge quality, and mutual settlement need not finalize every milestone. Live mutual-settlement evidence is **Pending verification**.
+
+## Record Evidence
+
+Keep the chain/escrow/ID, successful create/accept/allowance/fund/submit/approve hashes, actual token transfers and public receipt link. Add only consented private-chat captures of replies that actually occurred; never publish tokens, wallet keys, session/link credentials or env values. Label illustrative figures **Illustration, not real funds**.
+
+Use [deployments](deployments.md#lifecycle-evidence) for the existing partial run, [architecture](architecture.md) for exact source rules and [Wave 2](wave-2.md) for planned work. A local formatter, test fixture, homepage preview or registered webhook is not live payment/Telegram evidence.
