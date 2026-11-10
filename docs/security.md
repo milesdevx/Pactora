@@ -1,86 +1,165 @@
-# Pactora Security and Verification
+# Pactora Security
 
-Pactora V2 is unaudited, testnet-only software. Local implementation and tests do not prove that the live Vercel alias or configured escrow has been upgraded. V1 remains immutable and must not be represented as fixed by a source-code change.
+Last verified: **2026-11-10 UTC**. **Testnet only. Unaudited. No subjective dispute arbitration.**
+
+Scope: the V2 Solidity escrow, web/API authentication, off-chain metadata, Telegram linking and notification delivery in this repository. Local tests are not an external audit or proof of a full live payout. V1 retains the issues disclosed below; changing V2 source cannot fix an immutable V1 deployment.
+
+## Contract Access
+
+Source: [PactoraEscrow.sol](../contracts/src/PactoraEscrow.sol). There is a custom immutable owner, not an administrator who can decide escrow payouts. The contract inherits OpenZeppelin `ReentrancyGuard`; it is not an upgradeable proxy and has no owner withdrawal, pause or arbitration function in this source.
+
+| Function | Caller and conditions |
+| --- | --- |
+| `createAgreement` | Any caller becomes client; provider must be nonzero and different; token must be allowed; 1-50 positive amounts and matching future deadlines |
+| `acceptAgreement` | Designated provider; existing Created agreement |
+| `fundAgreement` | Client; Accepted; every original deadline still future; `nonReentrant` |
+| `submitMilestone` | Provider; Funded; Pending/Rejected; strictly before effective delivery/resubmission cutoff |
+| `approveMilestone` | Client; Funded; Submitted; `nonReentrant`; no extra time cutoff |
+| `rejectMilestone` | Client; Funded; Submitted; strictly before `submittedAt + REVIEW_WINDOW` |
+| `claimAfterTimeout` | Provider; Funded; Submitted; at or after `submittedAt + REVIEW_WINDOW`; `nonReentrant` |
+| `refundNoShow` | Client; Funded; Pending/Rejected; at or after effective cutoff; `nonReentrant` |
+| `cancelUnfundedAgreement` | Either party; Created or Accepted, not Funded |
+| `proposeResolution` | Either party; Funded; split exactly equals remaining balance; may replace an active proposal |
+| `acceptResolutionProposal` | The other party, not proposer; Funded; active matching expected hash and remaining split; `nonReentrant` |
+| `cancelResolutionProposal` | Active proposal's proposer only; no independent agreement-state check in this function |
+| `setTokenAllowed` | Immutable owner via `onlyOwner`; nonzero token and deployed code when allowing |
+
+Public views and generated getters are unrestricted. Missing IDs may return default structs; [chain readers](../lib/chain/server.ts) and the [identity helper](../lib/chain/agreements.ts) reject them as not found, rather than treating enum zero as a valid Created agreement.
 
 ## Contract Controls
 
-- OpenZeppelin `ReentrancyGuard`, not an upgradeable guard, protects every money-moving entrypoint. `SafeERC20` performs transfers; state changes precede transfers and revert together on failure.
-- Funding requires exact client debit and escrow credit. Payouts require exact escrow debit and recipient credit. The deployed V2 script enforces a canonical-MUSD allowlist. Negative rebases and dishonest token balance reporting remain token-trust limitations.
-- Every milestone has a positive amount. Their sum is the agreement total. Released plus refunded never exceeds total; terminal settlement equals total.
-- Client-only funding, approval, rejection and no-show refund; provider-only acceptance, submission and review-timeout claim. Either party can cancel before funding or propose a mutual split. Only the other party accepts it.
-- Tokens must be nonzero contracts in both allowlist modes. The owner controls allowlist additions, not withdrawals.
-- A proposal hash commits to contract address, chain ID, agreement ID, persistent nonce, proposer and both amounts. Acceptance supplies that exact hash. Replacement or cancellation/reproposal cannot silently substitute terms. Payouts invalidate pending proposals.
-- V2 stores delivery deadlines at creation, accepted by the provider before funding. Funding refuses elapsed deadlines. Submission is strictly before the delivery cutoff; no-show refunds are at or after it.
-- Submitted work has a seven-day review window. Rejection is strictly before its end; provider timeout claims are at or after it. Submitted work is never a no-show refund candidate.
-- Rejected work gets until the later of its original deadline and rejection plus seven days to resubmit. Resubmission starts a fresh review period. These rules address silence, not deliverable authenticity or bad-faith rejection.
-- Fully settled agreements are `Completed` if entirely released, otherwise `Cancelled`. A mutual split need not individually approve milestones. `AgreementCancelled.refundAmount` is cumulative, not an additional transfer.
+| Control | Implementation and limit |
+| --- | --- |
+| Reentrancy guard | `fundAgreement`, `approveMilestone`, `claimAfterTimeout`, `refundNoShow`, `acceptResolutionProposal` protect all token-moving entrypoints. State-only methods are not described as guarded. |
+| Safe token calls | `fundAgreement` uses `SafeERC20.safeTransferFrom`; `_transferExact` uses `safeTransfer`. A failed transfer reverts the whole transaction. |
+| Exact funding | `fundAgreement` checks client debit and escrow credit each equal `totalAmount`, rejecting fee/extra-debit transfers with `InexactTokenTransfer`. |
+| Exact payout/refund | `_transferExact`, reached by approval, timeout, no-show refund and mutual acceptance, checks escrow debit and recipient credit equal the intended amount. |
+| Milestone total | `createAgreement` rejects zero amounts and sums the milestones to construct `totalAmount`. There is no independently trusted client-supplied total. |
+| Accounting invariant | `_closeIfSettled` enforces `releasedAmount + refundedAmount <= totalAmount`. `proposeResolution` and `acceptResolutionProposal` require an exact split of the remaining balance. |
+| Effects before interactions | `fundAgreement` updates funding state before transferFrom; `_releaseMilestone`, `refundNoShow` and `acceptResolutionProposal` update accounting/invalidate proposals/close before payouts. Reverts roll effects and events back. |
+| Bound settlement consent | `proposeResolution` hashes `abi.encode(address(this), block.chainid, agreementId, persistent nonce, proposer, client refund, provider release)` with keccak256. `acceptResolutionProposal` requires the reviewed `bytes32 expectedProposalHash`. |
+| Proposal invalidation | `_releaseMilestone` and `refundNoShow` invalidate a pending split when funds change. Replacement and cancellation delete it without resetting its nonce. Submit/reject do not change funds and do not invalidate it. |
+| Token validation | Constructor requires nonzero contract code. `isTokenAllowed` always requires nonzero code; `setTokenAllowed` cannot allow an EOA. The [deployment script](../contracts/script/DeployPactoraEscrow.s.sol) requires chain 31611 and constructs V2 with canonical MUSD and allowlisting enabled. |
 
-## Wallet Sessions
+Allowlisting is checked at agreement creation, not rechecked by funding/payout after an owner revocation. The current app accepts only canonical MUSD even if the owner adds another token. Exact-transfer checks do not eliminate later negative rebases, dishonest `balanceOf` reporting or token-code changes.
 
-Authentication is **SIWE-style, not EIP-4361 compliant**. The custom message includes normalized wallet address, random nonce, issue/expiry times, application origin, chain `31611`, and a no-transaction notice.
+`REVIEW_WINDOW` is 604,800 seconds. Pending delivery uses the agreed absolute deadline; Rejected work uses `max(deliveryDeadline, rejectedAt + 604800)`. Submitted work can never be a no-show refund. Rejection stops at the review boundary; provider claim starts at equality. All these actions require a transaction and BTC gas. Repeated timely revisions can extend the process without a contract-level count limit.
 
-`POST /api/auth/nonce` stores a 32-byte random nonce for five minutes. Verification uses server-side `viem.verifyMessage`, then consumes exactly one matching stored nonce with a conditional `UPDATE ... RETURNING` inside the transaction that creates the session. Unknown, expired, reused or mismatched nonces and database failures cannot authenticate.
+Fully settled agreements are Completed only when the cumulative refund is zero; otherwise Cancelled. Mutual settlement need not finalize individual milestone states. The exact state machines are in [architecture](architecture.md#agreement-states).
 
-Sessions are 32-byte random opaque tokens; only SHA-256 hashes persist in `wallet_sessions`. Cookies are HttpOnly, SameSite=Lax, Secure in production, host-scoped and expire after 24 hours. Protected API calls independently validate the session and wallet ownership. Mutations validate same origin. Production `APP_URL` must be HTTPS. `SESSION_SECRET` is not used by this design.
+## Backend Authentication
 
-## Telegram Controls
+Source: [auth routes](../app/api/auth), [crypto helper](../lib/security/crypto.ts), [session helper](../lib/security/session.ts), [request validation](../lib/security/api.ts).
 
-- Signed-session link creation is persistently rate-limited. A 32-byte base64url token is 43 characters; `link_` plus the token stays inside Telegram's 64-character deep-link limit. Only its SHA-256 hash persists, including in queued webhook payloads. It expires after 15 minutes.
-- Token consumption is one conditional update checking hash, expiry, unused status and `issuedWithSession`, inside the link transaction. Unique constraints enforce one wallet per chat and one chat per wallet.
-- Legacy tokens and links default to unverified; they must be reissued through a signed wallet session. Old data is not silently promoted to verified ownership.
-- The upgrade migration redacts legacy raw webhook payloads while retaining update IDs and statuses. Unique-link constraints require a duplicate-data preflight before applying production SQL; duplicate records must not be silently deleted.
-- Webhooks fail closed without a configured secret. Header verification is **secret-token header verification (constant-time)** using an equal-byte-length guard and `timingSafeEqual`, **not HMAC** and not proof of Telegram's network origin independent of the shared secret.
-- Only private messages with matching sender/chat ID can mutate links or expose linked-account details. Unknown message content is discarded, not stored. Raw bearer tokens, bot tokens and upstream error bodies are not logged.
-- Unique `update_id` insertion uses insert-or-ignore, not read-then-write. A persisted job is acknowledged before `after()` handles commands and sends replies. Sending failures do not turn the webhook response into a 500.
-- Notification requests accept only a transaction hash. The server reads its successful Mezo Testnet receipt, filters logs to the configured escrow and verifies the caller is a party. It never accepts a browser's claimed transaction success or payout amount.
-- Outbox event keys deduplicate each recipient/event. Delivery remains best-effort; automatic retry/indexer operation is not yet implemented. A crash after Telegram accepts a send but before DB acknowledgment can still cause a later duplicate delivery.
-- Production test notifications require the literal `ALLOW_TEST_NOTIFICATIONS=true`, an authenticated wallet, its verified linked chat, enabled preferences and a rate limit. No arbitrary chat ID is accepted.
+Authentication is a **SIWE-style signed nonce**, not EIP-4361 compliant SIWE. `createAuthMessage` builds a custom "Pactora Authentication" message containing normalized wallet, nonce, issue time, origin, chain ID and expiry, plus a no-transaction notice. `/api/auth/verify` uses server-side `viem.verifyMessage`, exact stored nonce/wallet/message matching and origin/chain lines. The signature schema accepts a 65-byte EOA-style signature; no verified ERC-1271 smart-wallet authentication flow is claimed.
 
-## Rate Limiting and Errors
+- `/api/auth/nonce` creates a random 32-byte nonce with a **five-minute** TTL and stores its authentication message.
+- `/api/auth/verify` consumes exactly one unexpired, unconsumed matching nonce using conditional `UPDATE ... RETURNING`, inside the transaction that creates the user/session. Failed database work cannot authenticate.
+- Session tokens are random 32-byte hex strings; only SHA-256 hashes persist in `wallet_sessions`. Expiry is **24 hours**.
+- The cookie is HttpOnly, SameSite=Lax, host-scoped, path `/`, and Secure in production. Session validation checks expiry against database time on protected requests.
+- Browser mutations validate same origin using `APP_URL`; production requires HTTPS. Public receipts and health do not require a session. Logout can clear an existing cookie without a fully valid session.
+- JSON request bodies are bounded to **65,536 bytes**, with content-type and Zod checks. Logs suppress unknown error details; configuration/database failures return errors, not fake success.
 
-PostgreSQL counters use atomic expiring UPSERTs. `RATE_LIMIT_SECRET` HMAC-hashes route/wallet or trusted Vercel IP identity; there is no in-memory fallback. Only Vercel's forwarding header is trusted on Vercel; other hosts share a route bucket. Missing configuration or database failures fail closed.
+## Telegram and Notifications
 
-Requests use Zod validation, bounded JSON bodies, explicit HTTP errors and sanitized failure logs. `/api/health` is an escrow readiness check: it verifies Mezo Testnet, contract bytecode, V2 views, canonical MUSD and enforced token allowlisting, but does not prove database availability. Server-only modules prevent database and bot credentials from being bundled into client code.
+Source: [link API](../app/api/telegram/link/route.ts), [webhook API](../app/api/telegram/webhook/route.ts), [command processor](../lib/telegram/webhook.ts), [notification processor](../lib/telegram/notifications.ts).
 
-## Frontend and Receipts
+Link creation requires the wallet's own signed session. Tokens contain 32 random bytes encoded as 43 base64url characters, expire after **15 minutes**, and persist only as SHA-256 hashes with signed-session provenance. `linkTelegramToken` conditionally consumes an unused, unexpired token inside the wallet/chat-link transaction. Unique constraints enforce one chat per wallet and one wallet per chat; old provenance defaults do not silently establish verified ownership.
 
-Writes specify Mezo Testnet `31611` and the selected wallet explicitly. Wrong-network switching, rejected signatures, confirmation, revert and unavailable-confirmation states are distinct. Duplicate actions remain disabled while signing or awaiting confirmation. Money confirmations show exact bigint-derived amount, token contract and full recipient before opening the wallet.
+Webhook authentication fails closed without a configured secret of sufficient length. It checks `X-Telegram-Bot-Api-Secret-Token` using equal byte lengths and `timingSafeEqual`. This is **constant-time shared-secret header comparison for equal-length inputs**, not HMAC and not independent proof of Telegram's network origin. Length rejection is early.
 
-Creation IDs come from successful `AgreementCreated` receipts, not clocks. Metadata is immutable after registration and its parties, amounts, deadlines and keccak256 terms commitment are rechecked against chain data. Submission/rejection text is stored only after receipt-event/hash verification. Missing evidence is labelled unavailable, never attached.
+Only private messages from a matching non-bot sender/chat ID can execute account commands. The stored payload is sanitized command data and, if applicable, a token hash. Unknown text and raw bearer tokens are not persisted. A unique Telegram update ID and conditional Pending-to-Processing transition avoid repeated command execution. The webhook acknowledges persistence before `after()` runs the command; that does not guarantee successful delivery.
 
-Public receipts use contract reads and confirmed logs, expose actual token contract and transaction links, and distinguish agreement budget from actually funded assets. Old receipts can specify their escrow address. History is bounded to 100,000 recent blocks plus creation/closure anchors when older; it is not presented as a complete indexer.
+`/api/notifications/confirmed` accepts a transaction hash, not client-reported event amounts. `readConfirmedReceipt` requires chain 31611 and a successful mined receipt, filtering logs to the configured escrow. `queueConfirmedNotifications` checks agreement-party membership and only targets verified linked participants with alerts enabled. Outbox keys bind chain, escrow, transaction/log and recipient. There is no additional confirmation-depth requirement or independent RPC quorum.
 
-## Phase B Findings
+The outbox can claim Pending/Failed jobs as Sending and record success/failure. Repeating an event request can requeue Pending/Failed jobs. There is no scheduled retry, lease recovery for stuck Sending/Processing jobs or complete event indexer. A crash after an external send has uncertain delivery status; exactly-once delivery is not guaranteed.
 
-References below identify the original reviewed revision, before fixes moved lines. All fixes require gates and deployment verification; a local fix is not a claim that V1 changed.
+`/api/notifications/test` is disabled in production unless `ALLOW_TEST_NOTIFICATIONS` is exactly the string `"true"`, not merely truthy. This is the code's gate, not a disclosure of its production setting. It also requires same origin, a signed session, a verified own-wallet link, enabled alerts and a rate limit. It accepts no arbitrary chat ID and labels the message **not a chain event**.
 
-| Severity | Original File:Line | Finding | Local Fix |
+Server credentials remain in server-only modules, never under a `NEXT_PUBLIC_` name. Phase 0's built-client scan found no server-secret references or configured secret values in **48 JavaScript/map files**. Legacy `SESSION_SECRET` and `LINK_TOKEN_SECRET` settings are not consumed by this V2 design.
+
+## Rate Limits
+
+Source: [persistent limiter](../lib/security/rate-limit.ts) and the route handlers. All windows are **60 seconds**. PostgreSQL atomic expiring UPSERTs store counters. HMAC-SHA256 hashes the route/identity bucket using `RATE_LIMIT_SECRET`; this HMAC use is unrelated to webhook authentication. The code checks a minimum secret string length of 32, not its entropy. Generate a strong random server-only secret.
+
+Only Vercel's `x-vercel-forwarded-for` is trusted when the runtime identifies Vercel. Other hosts share the unauthenticated route bucket. Authenticated mutations use wallet identity; webhook commands use chat ID. Missing limiter configuration/database access fails closed; no in-memory fallback exists.
+
+| Handler bucket | Requests per 60 seconds | Identity |
+| --- | --- | --- |
+| `auth:nonce` | 10 | Trusted IP or shared |
+| `auth:verify` | 20 | Trusted IP or shared |
+| `agreements:create` | 10 | Wallet |
+| `agreements:evidence` | 20 | Wallet |
+| `telegram:link` | 5 | Wallet |
+| `telegram:unlink` | 5 | Wallet |
+| `telegram:webhook` | 60 | Private chat |
+| `notifications:confirmed` | 30 | Wallet |
+| `notifications:test` | 3 | Wallet |
+
+GET handlers and logout have no explicit application rate limit. These values are not claims about Vercel's infrastructure limits.
+
+## Metadata and Receipts
+
+The [creation route](../app/api/agreements/route.ts) checks the client session, successful creation event, actual ID, parties, token, terms hash, milestone sums and deadlines before immutable registration. A unique verified chain/escrow/ID key prevents a second metadata registration from overwriting the first. Reads recheck metadata against chain state.
+
+The [evidence route](../app/api/agreements/[id]/evidence/route.ts) requires party membership and the appropriate author, then matches keccak256 of supplied text to a confirmed submission/rejection event. It verifies a text commitment, not the quality or contents of a linked deliverable. Public receipts read token metadata, actual funded/released/refunded state and bounded chain-event history; a budget is not presented as a deposit.
+
+## Threat Model
+
+| Threat | Mitigation in current code | Residual risk |
+| --- | --- | --- |
+| Client unresponsive after submission | Provider `claimAfterTimeout` after 604,800 seconds | Provider must submit a valid transaction and pay gas; a timely rejection changes the path |
+| Provider no-show | Client `refundNoShow` at agreed/effective deadline | Only Pending/Rejected work qualifies; a hash is not proof of quality |
+| Bad-faith rejection or contested work | Review boundaries and hash-bound mutual settlement | No subjective arbitration; repeated timely revisions can extend the process |
+| Malicious/fee token | Code validation, allowlist, SafeERC20 and exact transfer deltas | Owner/token trust, later rebases and dishonest balances remain |
+| Reentrant token callback | Guarded money entrypoints and effects before payouts | Tests are not exhaustive correctness proof |
+| Replayed nonce or forged wallet signature | Exact message/signature check, expiry and atomic single consumption | Stolen wallet key/session or compromised client remains a risk |
+| Stolen link token | Hash at rest, signed-session issuance, 15-minute single use | The deep link is a bearer credential; a thief can consume it first |
+| Forged webhook | Required shared secret, equal-length constant-time comparison | Leaked shared secret allows forgery; no independent sender attestation |
+| Duplicate update/event | Unique update/outbox keys and conditional claims | Crashes can strand work; automatic retry and exactly-once external delivery are absent |
+| RPC lies or reorg | Chain-ID/config checks, successful receipt and scoped logs | One RPC is trusted; no quorum/finality-depth check; read/notification state can be wrong |
+| Settlement front-running/replacement | Expected proposal hash, persistent nonce, remaining-balance checks and payout invalidation | Changed proposals cause stale acceptance to revert; parties must review the actual split |
+| Metadata substitution | Party/receipt/hash/amount/deadline verification | Off-chain text may be unavailable; registered discovery is incomplete |
+
+## Test Evidence
+
+Commands were run on **2026-11-10 UTC**, from the repository root except Foundry commands from `contracts`.
+
+| Command | Actual result |
+| --- | --- |
+| `pnpm.cmd typecheck` | Passed |
+| `pnpm.cmd lint` | Passed, no ESLint warnings/errors; Next lint command emitted a deprecation notice |
+| `pnpm.cmd test` | **136 passed**, 14 files |
+| `pnpm.cmd build` | Passed; Next.js 15.5.28 build |
+| `pnpm.cmd test:e2e` | **2 passed**, desktop/mobile public-page smoke checks |
+| `pnpm.cmd check:client-secrets` | Passed; **48** client JavaScript/map files |
+| `forge test -vv` | **72 passed, 0 failed, 0 skipped**; three fuzz tests each ran 256 cases, not 768 extra tests |
+| `forge coverage` | Passed; the same 72 tests |
+
+| Coverage scope | Lines | Branches | Functions |
 | --- | --- | --- | --- |
-| High | `contracts/src/PactoraEscrow.sol:399-427` | Unbound resolution acceptance | Persistent proposal identity and expected hash |
-| High | `contracts/src/PactoraEscrow.sol:238-244,328,440-444` | Nominal fee-token pooled insolvency | Exact debit/credit checks and enforced reviewed-token allowlist |
-| Medium | `contracts/src/PactoraEscrow.sol:253-427` | Silence locks funded work | User-approved deadlines, review claims and guarded refunds |
-| Low | `contracts/src/PactoraEscrow.sol:129-155` | Owner could allowlist an EOA | Unconditional code/zero validation |
-| High | `app/api/auth/verify/route.ts:53-91` | Authentication fails open, no session | Atomic nonce consumption and DB-backed session |
-| High | `app/api/telegram/link/route.ts:23-60` | Arbitrary-wallet links and fake DB success | Signed-session ownership, persistence and limits |
-| High | `app/api/agreements/route.ts:54-124` | Unverified metadata overwrite/notifications | Receipt/terms/amount/deadline verification and immutable registration |
-| High | `app/api/telegram/webhook/route.ts:20-26` | Missing secret disables authentication | Fail-closed constant-time comparison |
-| Medium | `app/api/telegram/webhook/route.ts:39-131` | Token and dedup races | Unique insert and conditional transaction update |
-| Medium | `app/api/notifications/test/route.ts:7-40` | False string enables production; arbitrary chat | Literal flag and verified owner recipient |
-| Medium | `app/api/auth/nonce/route.ts:25-37` | Long expiry/fake persistence fallback | Five-minute expiry and fail closed |
-| Medium | `app/api/agreements/[id]/route.ts:14-37` | Partial IDs and disguised DB failure | Strict IDs, distinct errors, protected reads |
-| Medium | `lib/telegram/bot.ts:39-56` | Raw upstream logging/invented config | Sanitized logs, escaped strings, required config |
-| High | `app/agreements/create/page.tsx:171-191` | Invented ID and pre-confirmation metadata | Receipt-derived ID and confirmed registration |
-| High | `app/agreements/create/page.tsx:62-65`; workspace `:145-166` | Floating-point money | Exact bigint parsing/formatting |
-| Medium | `app/agreements/[id]/page.tsx:173-275` | Unhandled writes/network drift | Confirmed transaction lifecycle and explicit chain/account |
-| Medium | `app/agreements/[id]/page.tsx:201-209,695-705` | Lost notes labelled attached | Receipt-verified evidence storage and truthful display |
-| Medium | `app/dashboard/page.tsx:49-180` | Failed reads look empty; decorative activity | Distinct loading/error states, no fabricated charts |
-| Medium | `app/receipts/[id]/page.tsx:34-190` | Invalid ID, unfunded totals and assumed token | Validated IDs, true funded/token state, confirmed logs |
-| Medium | `app/settings/telegram/page.tsx:58-116` | No auth/status; arbitrary test chat | Signed sessions and server-owned link management |
-| High | Legacy link-token/link rows | Pre-upgrade ownership was never proven | Provenance markers default false; require signed relinking |
-| Medium | New metadata deadline integration | Hash alone did not match separately supplied deadlines | Direct equality checks on write/list/read |
+| `src/PactoraEscrow.sol` | **99.58% (238/239)** | **97.30% (72/74)** | **100% (27/27)** |
+| Aggregate including deployment script and mocks | **98.06% (303/309)** | **97.65% (83/85)** | **100% (44/44)** |
 
-## Verification Limits
+Foundry 1.9.1-nightly used Solc 0.8.37; coverage disables optimizer/viaIR and excludes dependencies by default. No extra coverage filters were supplied. These are instrumented source-map counters, not physical source-line counts or an audit score.
 
-The V2 contract worker ran 71 passing local tests and coverage: 238/239 lines, 72/74 branches, 27/27 functions. Money-moving functions have no unhit instrumented lines except the defensive remaining-split rejection at line 491; the total-invariant failure branch at 545 is also unhit. These figures must be rerun for the final revision.
+Server suites label their data as Illustration fixtures. Foundry creates local MockERC20/escrow instances and uses `vm.warp`; a local seven-day time-warp test is **not seven days on a live chain**. Browser smoke tests do not sign transactions or exercise Telegram. Actual create/accept receipts are separate evidence in [deployments](deployments.md#lifecycle-evidence).
 
-Unit fixtures are labelled Illustration and are not live transaction evidence. Isolated PostgreSQL concurrency integration has not run because Docker is unavailable. Production schema, V2 redeploy, real Telegram commands, two-wallet demo and source verification remain separate live gates.
+## Known Limitations
+
+- No external Pactora security audit or subjective dispute arbitration is verified. Use testnet-only wallets and test assets.
+- V1 has no timeout/no-show paths, accepts unbound replaceable settlement proposals, uses nominal token accounting and has weaker allowlist validation. Its historical source was read with `git show b773f72:contracts/src/PactoraEscrow.sol`; V2 changes do not alter that deployment.
+- No complete indexer. Dashboard/Telegram discovery is bounded as documented in [architecture](architecture.md#discovery-and-receipt-limits); receipt history older than 100,000 blocks can be incomplete.
+- Delivery depends on app-confirmed callbacks and best-effort `after()` work, with no automatic retry or stuck-job recovery.
+- **Pending verification:** full two-wallet funding/submission/approval/payout and real private-chat linking/commands/alerts. Verified V2 creation/acceptance is an unfunded partial run, not completed payment evidence.
+- **Pending verification:** production database provider/schema and PostgreSQL concurrency/rollback integration. No production DB connection or isolated real-DB integration run was part of Phase 0.
+- **Pending verification:** explorer source publication. Its API returned bytecode fields without verification metadata; Sourcify separately reports runtime `exact_match`, not a creation match.
+- The live `/help` footer still uses "audited" wording and MIT licensing text. Neither is the documentation's security status: Pactora is unaudited and the repository [LICENSE](../LICENSE) is Apache-2.0. Application text was not changed in this Markdown-only task.
+
+## Responsible Disclosure
+
+GitHub currently serves this file as the repository [security policy](https://github.com/milesdevx/Pactora/security/policy). No separate project-specific disclosure contact or response commitment was found in tracked files; OpenZeppelin's vendored policy is for that dependency, not Pactora.
+
+Use the repository [issue tracker](https://github.com/milesdevx/Pactora/issues) for a **non-sensitive request for private follow-up**. Include the affected version, chain/escrow and public transaction hash where safe. Do not post exploit instructions, private keys, tokens, session/link credentials or environment values publicly.
+
+**Pending verification:** a dedicated private-reporting channel and response policy have not been confirmed. Check the current security policy for a private route before sharing vulnerability details.
